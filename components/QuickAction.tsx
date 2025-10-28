@@ -6,13 +6,23 @@ interface QuickActionProps {
   icon: React.ReactNode;
   title: string;
   backgroundColor: string;
+  onPress?: () => void;
+  disabled?: boolean;
 }
 
-export function QuickAction({ icon, title, backgroundColor }: QuickActionProps) {
+export function QuickAction({
+  icon,
+  title,
+  backgroundColor,
+  onPress,
+  disabled,
+}: QuickActionProps) {
   return (
     <TouchableOpacity
       style={[styles.container, { backgroundColor }]}
-      activeOpacity={0.8}>
+      activeOpacity={0.8}
+      onPress={onPress}
+      disabled={disabled}>
       <View style={styles.iconContainer}>{icon}</View>
       <Text style={styles.title}>{title}</Text>
     </TouchableOpacity>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,20 +6,77 @@ import {
   TouchableOpacity,
   TextInput,
 } from 'react-native';
-import { Moon, Clock } from 'lucide-react-native';
+import { Moon } from 'lucide-react-native';
 import { ProgressRing } from './ProgressRing';
 import { colors, spacing } from '@/constants/theme';
 
-export function SleepTracker() {
-  const [sleepHours, setSleepHours] = useState(8);
-  const [bedTime, setBedTime] = useState('22:30');
-  const [wakeTime, setWakeTime] = useState('06:30');
-  const [quality, setQuality] = useState(4);
+interface SleepTrackerProps {
+  target?: number;
+  initialHours?: number;
+  initialBedTime?: string;
+  initialWakeTime?: string;
+  initialQuality?: number;
+  onSave?: (payload: {
+    hours: number;
+    bedTime: string;
+    wakeTime: string;
+    quality: number;
+  }) => Promise<void> | void;
+  isSaving?: boolean;
+}
 
-  const target = 8;
+export function SleepTracker({
+  target = 8,
+  initialHours = 8,
+  initialBedTime = '22:30',
+  initialWakeTime = '06:30',
+  initialQuality = 4,
+  onSave,
+  isSaving = false,
+}: SleepTrackerProps) {
+  const [sleepHours, setSleepHours] = useState(initialHours);
+  const [bedTime, setBedTime] = useState(initialBedTime);
+  const [wakeTime, setWakeTime] = useState(initialWakeTime);
+  const [quality, setQuality] = useState(initialQuality);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setSleepHours(initialHours);
+  }, [initialHours]);
+
+  useEffect(() => {
+    setBedTime(initialBedTime);
+  }, [initialBedTime]);
+
+  useEffect(() => {
+    setWakeTime(initialWakeTime);
+  }, [initialWakeTime]);
+
+  useEffect(() => {
+    setQuality(initialQuality);
+  }, [initialQuality]);
+
   const progress = Math.min(sleepHours / target, 1);
 
   const qualityLabels = ['Muy Malo', 'Malo', 'Regular', 'Bueno', 'Excelente'];
+
+  const handleSave = async () => {
+    if (!onSave || isSubmitting) {
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await onSave({
+        hours: sleepHours,
+        bedTime,
+        wakeTime,
+        quality,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -87,10 +144,16 @@ export function SleepTracker() {
         <Text style={styles.qualityLabel}>{qualityLabels[quality - 1]}</Text>
       </View>
 
-      <TouchableOpacity
-        style={[styles.saveButton, { backgroundColor: colors.purple.main }]}>
-        <Text style={styles.saveButtonText}>Guardar Sueño</Text>
-      </TouchableOpacity>
+      {onSave && (
+        <TouchableOpacity
+          style={[styles.saveButton, { backgroundColor: colors.purple.main }]}
+          onPress={handleSave}
+          disabled={isSaving || isSubmitting}>
+          <Text style={styles.saveButtonText}>
+            {isSaving || isSubmitting ? 'Guardando...' : 'Guardar Sueño'}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
