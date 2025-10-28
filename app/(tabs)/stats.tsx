@@ -1,22 +1,122 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Calendar, Award, TrendingUp } from 'lucide-react-native';
+import { Calendar, TrendingUp } from 'lucide-react-native';
 import { StatCard } from '@/components/StatCard';
-import { ProgressChart } from '@/components/ProgressChart';
+import { ProgressChart, ProgressChartPoint } from '@/components/ProgressChart';
 import { AchievementBadge } from '@/components/AchievementBadge';
 import { colors, spacing } from '@/constants/theme';
+import { useAppContext } from '@/context/AppContext';
+import {
+  addDays,
+  subtractDays,
+  subtractMonths,
+  subtractWeeks,
+  startOfMonth,
+  daysInMonth,
+  toDateKey,
+  formatWeekdayShort,
+  formatMonthShort,
+} from '@/utils/date';
 
 type PeriodType = 'week' | 'month' | 'year';
 
 export default function Stats() {
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>('week');
+  const { dashboard } = useAppContext();
+
+  const streak = useMemo(() => {
+    const snapshots = Object.values(dashboard.dailySnapshots ?? {});
+    return snapshots.filter((item) => item.completionPercentage > 0).length;
+  }, [dashboard.dailySnapshots]);
+
+  const completionThisWeek = useMemo(() => {
+    const today = new Date();
+    const snapshots = dashboard.dailySnapshots ?? {};
+    const values = Array.from({ length: 7 }).map((_, index) => {
+      const dateKey = toDateKey(subtractDays(today, index));
+      return snapshots[dateKey]?.completionPercentage ?? 0;
+    });
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return Math.round(average * 100);
+  }, [dashboard.dailySnapshots]);
+
+  const chartData = useMemo<ProgressChartPoint[]>(() => {
+    const snapshots = dashboard.dailySnapshots ?? {};
+    const today = new Date();
+
+    if (selectedPeriod === 'week') {
+      return Array.from({ length: 7 }).map((_, index) => {
+        const date = subtractDays(today, 6 - index);
+        const key = toDateKey(date);
+        const percentage = Math.round((snapshots[key]?.completionPercentage ?? 0) * 100);
+        return {
+          label: formatWeekdayShort(date),
+          percentage,
+        };
+      });
+    }
+
+    if (selectedPeriod === 'month') {
+      return Array.from({ length: 4 }).map((_, index) => {
+        const endOfWeek = subtractWeeks(today, 3 - index);
+        const dates = Array.from({ length: 7 }).map((__, offset) =>
+          toDateKey(subtractDays(endOfWeek, offset))
+        );
+        const values = dates.map((dateKey) => snapshots[dateKey]?.completionPercentage ?? 0);
+        const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+        return {
+          label: `S${index + 1}`,
+          percentage: Math.round(average * 100),
+        };
+      });
+    }
+
+    return Array.from({ length: 6 }).map((_, index) => {
+      const monthDate = subtractMonths(today, 5 - index);
+      const label = formatMonthShort(monthDate);
+      const start = startOfMonth(monthDate);
+      const totalDays = daysInMonth(monthDate);
+      const values = Array.from({ length: totalDays }).map((__, offset) => {
+        const current = addDays(start, offset);
+        return snapshots[toDateKey(current)]?.completionPercentage ?? 0;
+      });
+      const average = values.reduce((sum, value) => sum + value, 0) / (values.length || 1);
+      return {
+        label,
+        percentage: Math.round(average * 100),
+      };
+    });
+  }, [dashboard.dailySnapshots, selectedPeriod]);
+
+  const achievementBadges = useMemo(() => [
+    {
+      icon: '🏆',
+      title: 'Primera Semana',
+      description: '7 días seguidos',
+      unlocked: streak >= 7,
+    },
+    {
+      icon: '💧',
+      title: 'Hidratado',
+      description: 'Meta de agua 5 días',
+      unlocked: dashboard.habits.water?.summary.isComplete ?? false,
+    },
+    {
+      icon: '⭐',
+      title: 'Perfeccionista',
+      description: '100% en un día',
+      unlocked: Object.values(dashboard.dailySnapshots ?? {}).some(
+        (item) => item.completionPercentage >= 1
+      ),
+    },
+    {
+      icon: '🎯',
+      title: 'Consistente',
+      description: '30 días seguidos',
+      unlocked: streak >= 30,
+    },
+  ], [dashboard.dailySnapshots, dashboard.habits, streak]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -74,55 +174,40 @@ export default function Stats() {
         <View style={styles.statsGrid}>
           <StatCard
             icon={<TrendingUp size={20} color={colors.green.main} />}
-            title="Racha Actual"
-            value="7"
+            title="Racha actual"
+            value={`${streak}`}
             subtitle="días consecutivos"
             color={colors.green.main}
           />
           <StatCard
             icon={<Calendar size={20} color={colors.blue.main} />}
-            title="Completados"
-            value="85%"
-            subtitle="esta semana"
+            title="Promedio semanal"
+            value={`${completionThisWeek}%`}
+            subtitle="hábitos completados"
             color={colors.blue.main}
           />
         </View>
 
         <View style={styles.chartSection}>
           <Text style={styles.sectionTitle}>Tendencias</Text>
-          <ProgressChart period={selectedPeriod} />
+          <ProgressChart data={chartData} emptyMessage="Sin datos para este periodo" />
         </View>
 
         <View style={styles.achievementsSection}>
-          <Text style={styles.sectionTitle}>Logros Recientes</Text>
+          <Text style={styles.sectionTitle}>Logros recientes</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.achievementsContent}>
-            <AchievementBadge
-              icon="🏆"
-              title="Primera Semana"
-              description="7 días seguidos"
-              unlocked={true}
-            />
-            <AchievementBadge
-              icon="💧"
-              title="Hidratado"
-              description="Meta de agua 5 días"
-              unlocked={true}
-            />
-            <AchievementBadge
-              icon="⭐"
-              title="Perfeccionista"
-              description="100% en un día"
-              unlocked={false}
-            />
-            <AchievementBadge
-              icon="🎯"
-              title="Consistente"
-              description="30 días seguidos"
-              unlocked={false}
-            />
+            {achievementBadges.map((badge) => (
+              <AchievementBadge
+                key={badge.title}
+                icon={badge.icon}
+                title={badge.title}
+                description={badge.description}
+                unlocked={badge.unlocked}
+              />
+            ))}
           </ScrollView>
         </View>
       </ScrollView>
@@ -204,3 +289,4 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
 });
+
