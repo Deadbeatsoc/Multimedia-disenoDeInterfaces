@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,10 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
-import { Droplets, Plus } from 'lucide-react-native';
+import { Droplets } from 'lucide-react-native';
 import { ProgressRing } from './ProgressRing';
 import { colors, spacing } from '@/constants/theme';
+import { HabitLog } from '@/types/api';
 
 const GLASS_SIZES = [
   { size: 250, label: '250ml', icon: '🥃' },
@@ -17,20 +18,126 @@ const GLASS_SIZES = [
   { size: 1000, label: '1L', icon: '🍼' },
 ];
 
-export function WaterTracker() {
-  const [consumed, setConsumed] = useState(1500); // ml
-  const target = 2000; // ml
-  const progress = Math.min(consumed / target, 1);
+interface WaterTrackerProps {
+  habitId?: number;
+  initialConsumed?: number;
+  target?: number;
+  color?: string;
+  history?: HabitLog[];
+  onAddLog?: (amount: number) => Promise<HabitLog | void> | HabitLog | void;
+  onComplete?: () => Promise<void> | void;
+  isSaving?: boolean;
+}
 
-  const handleAddWater = (amount: number) => {
-    setConsumed((prev) => Math.min(prev + amount, target * 1.5));
+export function WaterTracker({
+  habitId,
+  initialConsumed = 0,
+  target = 2000,
+  color = colors.blue.main,
+  history = [],
+  onAddLog,
+  onComplete,
+  isSaving = false,
+}: WaterTrackerProps) {
+  const [consumed, setConsumed] = useState(initialConsumed);
+  const [logHistory, setLogHistory] = useState<HabitLog[]>(history);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setConsumed(initialConsumed);
+  }, [initialConsumed]);
+
+  useEffect(() => {
+    setLogHistory(history);
+  }, [history]);
+
+  const progress = useMemo(() => Math.min(consumed / target, 1), [consumed, target]);
+
+  const formatAmount = (amount: number) => {
+    if (amount >= 1000) {
+      return `${(amount / 1000).toFixed(1)}L`;
+    }
+    return `${amount}ml`;
+  };
+
+  const handleAddWater = async (amount: number) => {
+    const previousValue = consumed;
+    const newValue = Math.min(previousValue + amount, target * 1.5);
+    setConsumed(newValue);
+
+    try {
+      if (onAddLog) {
+        const result = await onAddLog(amount);
+        if (result) {
+          setLogHistory((prev) => [result, ...prev].slice(0, 20));
+        }
+      } else {
+        setLogHistory((prev) => [
+          {
+            id: Date.now(),
+            habitId: habitId ?? 0,
+            value: amount,
+            notes: null,
+            loggedAt: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+      }
+    } catch (error) {
+      console.error('[WaterTracker] Error al registrar agua', error);
+      setConsumed(previousValue);
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!onComplete || isSubmitting) {
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await onComplete();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const renderHistory = () => {
+    if (!logHistory.length) {
+      return (
+        <View style={styles.emptyHistory}>
+          <Text style={styles.emptyHistoryText}>
+            Aún no tienes registros para este hábito hoy.
+          </Text>
+        </View>
+      );
+    }
+
+    return logHistory.map((log) => {
+      const time = new Date(log.loggedAt).toLocaleTimeString('es-ES', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      return (
+        <View style={styles.historyItem} key={`${log.id}-${log.loggedAt}`}>
+          <Text style={styles.historyTime}>{time}</Text>
+          <View style={styles.historyContent}>
+            <Droplets size={16} color={color} />
+            <Text style={styles.historyText}>
+              {formatAmount(log.value)}{log.notes ? ` - ${log.notes}` : ''}
+            </Text>
+          </View>
+        </View>
+      );
+    });
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.titleContainer}>
-          <Droplets size={24} color={colors.blue.main} />
+          <Droplets size={24} color={color} />
           <Text style={styles.title}>Consumo de Agua</Text>
         </View>
       </View>
@@ -39,7 +146,7 @@ export function WaterTracker() {
         <ProgressRing progress={progress} size={140} strokeWidth={10}>
           <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
           <Text style={styles.progressSubtext}>
-            {consumed}ml de {target}ml
+            {formatAmount(consumed)} de {formatAmount(target)}
           </Text>
         </ProgressRing>
       </View>
@@ -59,40 +166,24 @@ export function WaterTracker() {
               <Text style={styles.glassLabel}>{glass.label}</Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+      </ScrollView>
       </View>
 
       <View style={styles.historySection}>
         <Text style={styles.sectionLabel}>Registro de Hoy</Text>
-        <View style={styles.historyList}>
-          <View style={styles.historyItem}>
-            <Text style={styles.historyTime}>08:30</Text>
-            <View style={styles.historyContent}>
-              <Droplets size={16} color={colors.blue.main} />
-              <Text style={styles.historyText}>250ml - Vaso de agua</Text>
-            </View>
-          </View>
-          <View style={styles.historyItem}>
-            <Text style={styles.historyTime}>12:15</Text>
-            <View style={styles.historyContent}>
-              <Droplets size={16} color={colors.blue.main} />
-              <Text style={styles.historyText}>500ml - Botella</Text>
-            </View>
-          </View>
-          <View style={styles.historyItem}>
-            <Text style={styles.historyTime}>15:45</Text>
-            <View style={styles.historyContent}>
-              <Droplets size={16} color={colors.blue.main} />
-              <Text style={styles.historyText}>750ml - Botella grande</Text>
-            </View>
-          </View>
-        </View>
+        <View style={styles.historyList}>{renderHistory()}</View>
       </View>
 
-      <TouchableOpacity
-        style={[styles.saveButton, { backgroundColor: colors.blue.main }]}>
-        <Text style={styles.saveButtonText}>Completar Día</Text>
-      </TouchableOpacity>
+      {onComplete && (
+        <TouchableOpacity
+          style={[styles.saveButton, { backgroundColor: color }]}
+          onPress={handleComplete}
+          disabled={isSaving || isSubmitting}>
+          <Text style={styles.saveButtonText}>
+            {isSaving || isSubmitting ? 'Guardando...' : 'Completar Día'}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -170,6 +261,15 @@ const styles = StyleSheet.create({
   },
   historyList: {
     gap: spacing.md,
+  },
+  emptyHistory: {
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+  },
+  emptyHistoryText: {
+    fontSize: 14,
+    color: colors.gray[500],
+    textAlign: 'center',
   },
   historyItem: {
     flexDirection: 'row',

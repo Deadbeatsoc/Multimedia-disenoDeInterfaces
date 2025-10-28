@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,9 @@ interface HabitTrackerProps {
   target: number;
   current: number;
   color: string;
+  onSave?: (value: number, notes: string) => Promise<void> | void;
+  isSaving?: boolean;
+  defaultNotes?: string;
 }
 
 export function HabitTracker({
@@ -26,9 +29,13 @@ export function HabitTracker({
   target,
   current: initialCurrent,
   color,
+  onSave,
+  isSaving = false,
+  defaultNotes = '',
 }: HabitTrackerProps) {
   const [current, setCurrent] = useState(initialCurrent);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(defaultNotes);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const progress = Math.min(current / target, 1);
   const percentage = Math.round(progress * 100);
@@ -39,6 +46,28 @@ export function HabitTracker({
 
   const handleDecrement = () => {
     setCurrent((prev) => Math.max(0, prev - 1));
+  };
+
+  useEffect(() => {
+    setCurrent(initialCurrent);
+  }, [initialCurrent]);
+
+  useEffect(() => {
+    setNotes(defaultNotes);
+  }, [defaultNotes]);
+
+  const handleSave = async () => {
+    if (!onSave || isSubmitting) {
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await onSave(current, notes);
+      setNotes(defaultNotes);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -91,8 +120,13 @@ export function HabitTracker({
         />
       </View>
 
-      <TouchableOpacity style={[styles.saveButton, { backgroundColor: color }]}>
-        <Text style={styles.saveButtonText}>Guardar Registro</Text>
+      <TouchableOpacity
+        style={[styles.saveButton, { backgroundColor: color }]}
+        onPress={handleSave}
+        disabled={isSaving || isSubmitting}>
+        <Text style={styles.saveButtonText}>
+          {isSaving || isSubmitting ? 'Guardando...' : 'Guardar Registro'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
