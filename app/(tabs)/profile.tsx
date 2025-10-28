@@ -1,18 +1,93 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, Settings, Bell, Target, Palette, Shield, CircleHelp as HelpCircle } from 'lucide-react-native';
+import { User, Settings, Bell, Target, Palette, Shield, CircleHelp as HelpCircle, Mail } from 'lucide-react-native';
 import { ProfileCard } from '@/components/ProfileCard';
 import { SettingsItem } from '@/components/SettingsItem';
 import { colors, spacing } from '@/constants/theme';
+import { useAppContext } from '@/context/AppContext';
 
 export default function Profile() {
+  const { user, updateProfile, dashboard } = useAppContext();
+  const [form, setForm] = useState({
+    username: '',
+    email: '',
+    height: '',
+    weight: '',
+    age: '',
+  });
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      setForm({
+        username: user.username,
+        email: user.email,
+        height: String(user.height),
+        weight: String(user.weight),
+        age: String(user.age),
+      });
+    }
+  }, [user]);
+
+  const streak = useMemo(() => {
+    const snapshots = Object.values(dashboard.dailySnapshots ?? {});
+    return snapshots.filter((item) => item.completionPercentage > 0).length;
+  }, [dashboard.dailySnapshots]);
+
+  const achievements = useMemo(() => {
+    const habits = Object.values(dashboard.habits ?? {});
+    return habits.filter((habit) => habit.summary.isComplete).length;
+  }, [dashboard.habits]);
+
+  const handleChange = (field: keyof typeof form, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSave = () => {
+    if (!form.username.trim() || !form.email.trim()) {
+      setMessage('El nombre de usuario y el correo son obligatorios.');
+      return;
+    }
+
+    const height = Number(form.height);
+    const weight = Number(form.weight);
+    const age = Number(form.age);
+
+    if (!Number.isFinite(height) || !Number.isFinite(weight) || !Number.isFinite(age)) {
+      setMessage('Verifica que altura, peso y edad sean valores numéricos.');
+      return;
+    }
+
+    updateProfile({
+      username: form.username.trim(),
+      email: form.email.trim(),
+      height,
+      weight,
+      age,
+    });
+    setMessage('Perfil actualizado. Tus recomendaciones se han recalculado.');
+  };
+
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>Inicia sesión para personalizar tu perfil</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const waterTarget = dashboard.habits.water?.summary.targetValue ?? 2000;
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -23,28 +98,74 @@ export default function Profile() {
 
         <View style={styles.profileSection}>
           <ProfileCard
-            name="María González"
-            email="maria@email.com"
-            streak={7}
-            achievements={12}
+            name={user.username}
+            email={user.email}
+            streak={streak}
+            achievements={achievements}
           />
         </View>
 
+        <View style={styles.formSection}>
+          <Text style={styles.sectionTitle}>Datos personales</Text>
+          <View style={styles.formCard}>
+            <ProfileField
+              label="Nombre"
+              value={form.username}
+              onChangeText={(value) => handleChange('username', value)}
+              icon={<User size={18} color={colors.gray[500]} />}
+            />
+            <ProfileField
+              label="Correo"
+              value={form.email}
+              onChangeText={(value) => handleChange('email', value)}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              icon={<Mail size={18} color={colors.gray[500]} />}
+            />
+            <View style={styles.inlineFields}>
+              <ProfileField
+                label="Altura (cm)"
+                value={form.height}
+                onChangeText={(value) => handleChange('height', value)}
+                keyboardType="numeric"
+                style={styles.inlineInput}
+              />
+              <ProfileField
+                label="Peso (kg)"
+                value={form.weight}
+                onChangeText={(value) => handleChange('weight', value)}
+                keyboardType="numeric"
+                style={styles.inlineInput}
+              />
+              <ProfileField
+                label="Edad"
+                value={form.age}
+                onChangeText={(value) => handleChange('age', value)}
+                keyboardType="numeric"
+                style={styles.inlineInput}
+              />
+            </View>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+              <Text style={styles.saveButtonText}>Guardar cambios</Text>
+            </TouchableOpacity>
+            {message && <Text style={styles.feedback}>{message}</Text>}
+          </View>
+        </View>
+
         <View style={styles.goalsSection}>
-          <Text style={styles.sectionTitle}>Metas Personales</Text>
+          <Text style={styles.sectionTitle}>Metas personales</Text>
           <View style={styles.goalCard}>
             <View style={styles.goalHeader}>
               <Target size={24} color={colors.blue.main} />
-              <Text style={styles.goalTitle}>Meta Principal</Text>
+              <Text style={styles.goalTitle}>Recomendación diaria</Text>
             </View>
             <Text style={styles.goalDescription}>
-              Mantener 4 hábitos saludables diariamente durante 30 días
+              Con tus datos actuales te recomendamos beber {(waterTarget / 1000).toFixed(1)} litros de agua al día.
             </Text>
             <View style={styles.goalProgress}>
-              <Text style={styles.goalProgressText}>Progreso: 7/30 días</Text>
-              <View style={styles.goalProgressBar}>
-                <View style={[styles.goalProgressFill, { width: '23%' }]} />
-              </View>
+              <Text style={styles.goalProgressText}>
+                Hábitos configurados: {Object.keys(dashboard.habits).length}
+              </Text>
             </View>
           </View>
         </View>
@@ -98,6 +219,42 @@ export default function Profile() {
   );
 }
 
+interface ProfileFieldProps {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  keyboardType?: 'default' | 'email-address' | 'numeric';
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  style?: object;
+  icon?: React.ReactNode;
+}
+
+function ProfileField({
+  label,
+  value,
+  onChangeText,
+  keyboardType = 'default',
+  autoCapitalize = 'none',
+  style,
+  icon,
+}: ProfileFieldProps) {
+  return (
+    <View style={[styles.fieldGroup, style]}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.fieldInputWrapper}>
+        {icon && <View style={styles.fieldIcon}>{icon}</View>}
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          style={styles.fieldInput}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+        />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -121,7 +278,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.lg,
   },
-  goalsSection: {
+  formSection: {
     padding: spacing.lg,
     paddingTop: 0,
   },
@@ -130,6 +287,65 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.gray[900],
     marginBottom: spacing.lg,
+  },
+  formCard: {
+    backgroundColor: '#FFFFFF',
+    padding: spacing.lg,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: spacing.md,
+  },
+  fieldGroup: {
+    gap: spacing.xs,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    color: colors.gray[600],
+  },
+  fieldInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.gray[100],
+    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+  },
+  fieldIcon: {
+    marginRight: spacing.sm,
+  },
+  fieldInput: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    fontSize: 16,
+    color: colors.gray[900],
+  },
+  inlineFields: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  inlineInput: {
+    flex: 1,
+  },
+  saveButton: {
+    backgroundColor: colors.blue.main,
+    paddingVertical: spacing.md,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  feedback: {
+    fontSize: 12,
+    color: colors.gray[600],
+  },
+  goalsSection: {
+    padding: spacing.lg,
+    paddingTop: 0,
   },
   goalCard: {
     backgroundColor: '#FFFFFF',
@@ -140,11 +356,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    gap: spacing.md,
   },
   goalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
     gap: spacing.md,
   },
   goalTitle: {
@@ -155,7 +371,6 @@ const styles = StyleSheet.create({
   goalDescription: {
     fontSize: 14,
     color: colors.gray[600],
-    marginBottom: spacing.lg,
     lineHeight: 20,
   },
   goalProgress: {
@@ -165,17 +380,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: colors.gray[700],
-  },
-  goalProgressBar: {
-    height: 8,
-    backgroundColor: colors.gray[200],
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  goalProgressFill: {
-    height: '100%',
-    backgroundColor: colors.blue.main,
-    borderRadius: 4,
   },
   settingsSection: {
     padding: spacing.lg,
@@ -199,16 +403,30 @@ const styles = StyleSheet.create({
   },
   dataButton: {
     backgroundColor: '#FFFFFF',
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.gray[200],
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   dataButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: colors.blue.main,
+    color: colors.gray[700],
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    color: colors.gray[600],
     textAlign: 'center',
   },
 });
+

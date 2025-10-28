@@ -15,8 +15,8 @@ import { ProgressRing } from '@/components/ProgressRing';
 import { QuickAction } from '@/components/QuickAction';
 import { colors, spacing } from '@/constants/theme';
 import { useDashboardData } from '@/hooks/useDashboardData';
+import { useAppContext } from '@/context/AppContext';
 import { getHabitIcon } from '@/utils/habitIcons';
-import { markNotificationAsRead, logHabitEntry } from '@/services/api';
 import { HabitSummary, HabitSlug } from '@/types/api';
 
 const quickActionConfig: Record<HabitSlug, { label: string; amount: number }> = {
@@ -27,6 +27,7 @@ const quickActionConfig: Record<HabitSlug, { label: string; amount: number }> = 
 };
 
 export default function Dashboard() {
+  const { logHabitEntry, markNotificationAsRead } = useAppContext();
   const { data, notifications, isLoading, isRefreshing, refresh } = useDashboardData();
   const [pendingHabitId, setPendingHabitId] = useState<number | null>(null);
   const [isMarkingReminder, setIsMarkingReminder] = useState(false);
@@ -84,7 +85,7 @@ export default function Dashboard() {
 
     try {
       setPendingHabitId(habit.id);
-      await logHabitEntry(habit.id, { value: config.amount });
+      logHabitEntry(habit.slug, config.amount);
       await refresh();
       Alert.alert('¡Listo!', `${config.label} registrado correctamente.`);
     } catch (error) {
@@ -106,7 +107,7 @@ export default function Dashboard() {
 
     try {
       setIsMarkingReminder(true);
-      await markNotificationAsRead(reminder.id);
+      markNotificationAsRead(reminder.id);
       await refresh();
     } catch (error) {
       Alert.alert(
@@ -318,46 +319,48 @@ const styles = StyleSheet.create({
   },
   quickActionsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.md,
   },
   reminderSection: {
     padding: spacing.lg,
     paddingTop: 0,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.xxl,
   },
   reminderCard: {
-    backgroundColor: colors.blue.light,
-    padding: spacing.lg,
+    backgroundColor: '#FFFFFF',
+    padding: spacing.xl,
     borderRadius: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.blue.main,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: spacing.sm,
   },
   reminderText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
     color: colors.gray[900],
-    marginBottom: spacing.xs,
   },
   reminderSubtext: {
     fontSize: 14,
     color: colors.gray[600],
-    marginBottom: spacing.md,
   },
   reminderButton: {
+    marginTop: spacing.sm,
     backgroundColor: colors.blue.main,
-    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
+    borderRadius: 12,
+    alignItems: 'center',
   },
   reminderButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
-    fontSize: 14,
   },
   reminderHabit: {
-    marginTop: spacing.sm,
     fontSize: 12,
     color: colors.gray[500],
   },
 });
+

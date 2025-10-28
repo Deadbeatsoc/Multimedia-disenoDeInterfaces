@@ -84,6 +84,24 @@ El esquema incluye las tablas:
    - Registrar agua, ejercicio, alimentación o sueño y sincronizarlo con la base de datos.
    - Consultar recordatorios y marcarlos como atendidos.
 
+## 4. Mapa de funcionalidades
+
+La siguiente tabla relaciona los requisitos planteados para la app de hábitos saludables con las pantallas y archivos más
+relevantes dentro del proyecto. Úsala como guía rápida para validar que cada flujo está implementado tanto en la interfaz como en
+la lógica de negocio.
+
+| Requisito | Implementación principal |
+| --- | --- |
+| Registro en dos pasos solicitando usuario, correo, contraseña, altura, peso y edad | [`app/index.tsx`](app/index.tsx) maneja el formulario, validaciones y el alta en el contexto global |
+| Recomendación de agua según altura y peso con posibilidad de meta personalizada | Lógica en [`context/AppContext.tsx`](context/AppContext.tsx) (`computeRecommendedWater`, `updateWaterSettings`) y controles en [`app/(tabs)/habits.tsx`](app/(tabs)/habits.tsx) |
+| Rutinas de sueño con recordatorios antes de dormir | Configuración editable en [`app/(tabs)/habits.tsx`](app/(tabs)/habits.tsx) y persistencia en el contexto (`updateSleepSettings`) |
+| Recordatorios de comidas configurables por horario | Sección de alimentación en [`app/(tabs)/habits.tsx`](app/(tabs)/habits.tsx) y manejo de recordatorios en `updateNutritionSettings` |
+| Registro y recordatorios de ejercicio diario | Componente `HabitTracker` en [`components/HabitTracker.tsx`](components/HabitTracker.tsx) y actualizaciones vía `updateExerciseSettings` |
+| Panel diario con progreso, acciones rápidas y recordatorios | Vista principal [`app/(tabs)/index.tsx`](app/(tabs)/index.tsx) apoyada por el hook [`hooks/useDashboardData.ts`](hooks/useDashboardData.ts) |
+| Estadísticas históricas con gráficos y logros | Pantalla [`app/(tabs)/stats.tsx`](app/(tabs)/stats.tsx) que utiliza el componente [`components/ProgressChart.tsx`](components/ProgressChart.tsx) |
+| Perfil editable para actualizar datos y recalcular recomendaciones | Pantalla [`app/(tabs)/profile.tsx`](app/(tabs)/profile.tsx) y método `updateProfile` en el contexto |
+| Persistencia y API REST | Esquema SQL en [`database/schema.sql`](database/schema.sql) y servidor Express en [`server/index.js`](server/index.js) |
+
 ## Notas adicionales
 
 - El hook `useDashboardData` maneja automáticamente la carga de información y el fallback en caso de que el backend no esté disponible.
