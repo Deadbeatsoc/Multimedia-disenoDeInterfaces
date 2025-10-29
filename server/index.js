@@ -121,9 +121,9 @@ app.post(
   asyncHandler(async (req, res) => {
     const { name, email, password, height, weight, age } = req.body ?? {};
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios' });
-    }
+  if (!name || !email || !password || !height || !weight || !age) {
+    return res.status(400).json({ message: 'Todos los campos son obligatorios' });
+  }
 
     const normalizedEmail = String(email).trim().toLowerCase();
     const normalizedName = String(name).trim();
@@ -139,10 +139,12 @@ app.post(
       return res.status(400).json({ message: 'Edad inválida' });
     }
 
-    const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
-    if (existing.length) {
-      return res.status(409).json({ message: 'Ya existe un usuario con ese correo' });
-    }
+  const result = await query(
+    `INSERT INTO users (username, email, password_hash, height_cm, weight_kg, age)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, username AS name, email, height_cm AS height, weight_kg AS weight, age, created_at AS "createdAt"`,
+    [name, email, passwordHash, height, weight, age]
+  );
 
     const passwordHash = await bcrypt.hash(String(password), 10);
     const client = await getClient();
