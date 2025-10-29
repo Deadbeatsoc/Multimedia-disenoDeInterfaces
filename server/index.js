@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import dayjs from 'dayjs';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { query } from './db.js';
 
 dotenv.config();
@@ -11,6 +13,11 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = Number(process.env.SERVER_PORT ?? 3000);
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET must be defined in the environment');
+}
 
 const asyncHandler = (handler) => async (req, res, next) => {
   try {
@@ -33,14 +40,155 @@ const formatProgressText = (value, target, unit) => {
   return `${roundedValue} ${unit} de ${roundedTarget} ${unit}`;
 };
 
+const toPublicUser = (row) => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  createdAt: row.createdAt ?? row.created_at,
+});
+
+const createToken = (userId) =>
+  jwt.sign(
+    {
+      userId,
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+const authMiddleware = async (req, res, next) => {
+  const authHeader = req.headers.authorization ?? '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'Token de autenticación requerido' });
+  }
+
+  const token = authHeader.slice(7).trim();
+  if (!token) {
+    return res.status(401).json({ message: 'Token de autenticación requerido' });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (!payload?.userId) {
+      return res.status(401).json({ message: 'Token inválido' });
+    }
+
+    const userId = Number(payload.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ message: 'Token inválido' });
+    }
+
+    req.userId = userId;
+    return next();
+  } catch (error) {
+    return res.status(401).json({ message: 'Token inválido o expirado' });
+  }
+};
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.post(
+  '/api/auth/register',
+  asyncHandler(async (req, res) => {
+    const { name, email, password } = req.body ?? {};
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+    if (existing.length) {
+      return res.status(409).json({ message: 'Ya existe un usuario con ese correo' });
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 10);
+
+    const inserted = await query(
+      `INSERT INTO users (name, email, password_hash)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, email, created_at AS "createdAt"`,
+      [String(name).trim(), normalizedEmail, passwordHash]
+    );
+
+    const [user] = inserted;
+    if (!user) {
+      return res.status(500).json({ message: 'No se pudo crear el usuario' });
+    }
+
+    const token = createToken(user.id);
+
+    res.status(201).json({
+      token,
+      user: toPublicUser(user),
+    });
+  })
+);
+
+app.post(
+  '/api/auth/login',
+  asyncHandler(async (req, res) => {
+    const { email, password } = req.body ?? {};
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Correo y contraseña son obligatorios' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const found = await query(
+      `SELECT id, name, email, password_hash AS "passwordHash", created_at AS "createdAt"
+       FROM users
+       WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    const [user] = found;
+    if (!user) {
+      return res.status(401).json({ message: 'Credenciales inválidas' });
+    }
+
+    const isValidPassword = await bcrypt.compare(String(password), user.passwordHash);
+    if (!isValidPassword) {
+      return res.status(401).json({ message: 'Credenciales inválidas' });
+    }
+
+    const token = createToken(user.id);
+
+    res.json({
+      token,
+      user: toPublicUser(user),
+    });
+  })
+);
+
+app.get(
+  '/api/auth/me',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const result = await query(
+      `SELECT id, name, email, created_at AS "createdAt"
+       FROM users
+       WHERE id = $1`,
+      [req.userId]
+    );
+
+    const [user] = result;
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    res.json({ user: toPublicUser(user) });
+  })
+);
+
 app.get(
   '/api/dashboard',
+  authMiddleware,
   asyncHandler(async (req, res) => {
-    const userId = Number(req.query.userId ?? 1);
+    const userId = req.userId;
     const requestedDate = req.query.date
       ? dayjs(req.query.date)
       : dayjs();
@@ -52,10 +200,18 @@ app.get(
     const date = requestedDate.format('YYYY-MM-DD');
 
     const habits = await query(
-      `SELECT id, slug, name, icon, color, target_value AS targetValue, target_unit AS targetUnit
-       FROM habits
-       WHERE user_id = ?
-       ORDER BY id ASC`,
+      `SELECT
+         uh.id,
+         ht.slug,
+         COALESCE(uh.custom_name, ht.name) AS name,
+         ht.icon,
+         ht.color,
+         uh.target_value AS "targetValue",
+         uh.target_unit AS "targetUnit"
+       FROM user_habits AS uh
+       INNER JOIN habit_types AS ht ON ht.id = uh.habit_type_id
+       WHERE uh.user_id = $1
+       ORDER BY uh.id ASC`,
       [userId]
     );
 
@@ -71,11 +227,12 @@ app.get(
     }
 
     const entries = await query(
-      `SELECT habit_id AS habitId, SUM(value) AS totalValue
-       FROM habit_entries
-       WHERE entry_date = ?
-       GROUP BY habit_id`,
-      [date]
+      `SELECT he.user_habit_id AS "habitId", SUM(he.value) AS "totalValue"
+       FROM habit_entries AS he
+       INNER JOIN user_habits AS uh ON uh.id = he.user_habit_id
+       WHERE uh.user_id = $1 AND he.entry_date = $2
+       GROUP BY he.user_habit_id`,
+      [userId, date]
     );
 
     const entryByHabit = new Map(entries.map((item) => [item.habitId, Number(item.totalValue)]));
@@ -103,9 +260,17 @@ app.get(
     });
 
     const notifications = await query(
-      `SELECT id, habit_id AS habitId, title, message, type, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt
+      `SELECT id,
+              user_habit_id AS "habitId",
+              title,
+              message,
+              type,
+              channel,
+              scheduled_for AS "scheduledFor",
+              read_at AS "readAt",
+              created_at AS "createdAt"
        FROM notifications
-       WHERE user_id = ?
+       WHERE user_id = $1
        ORDER BY COALESCE(scheduled_for, created_at) ASC
        LIMIT 10`,
       [userId]
@@ -139,6 +304,7 @@ app.get(
 
 app.get(
   '/api/habits/:habitId/logs',
+  authMiddleware,
   asyncHandler(async (req, res) => {
     const habitId = Number(req.params.habitId);
     if (Number.isNaN(habitId)) {
@@ -152,22 +318,31 @@ app.get(
       return res.status(400).json({ message: 'Fecha inválida' });
     }
 
+    const habitOwnership = await query(
+      'SELECT id FROM user_habits WHERE id = $1 AND user_id = $2',
+      [habitId, req.userId]
+    );
+
+    if (!habitOwnership.length) {
+      return res.status(404).json({ message: 'Hábito no encontrado' });
+    }
+
     let logs;
     if (dateFilter) {
       logs = await query(
-        `SELECT id, habit_id AS habitId, value, notes, logged_at AS loggedAt
+        `SELECT id, user_habit_id AS "habitId", value, notes, logged_at AS "loggedAt"
          FROM habit_entries
-         WHERE habit_id = ? AND entry_date = ?
+         WHERE user_habit_id = $1 AND entry_date = $2
          ORDER BY logged_at DESC`,
         [habitId, dateFilter.format('YYYY-MM-DD')]
       );
     } else {
       logs = await query(
-        `SELECT id, habit_id AS habitId, value, notes, logged_at AS loggedAt
+        `SELECT id, user_habit_id AS "habitId", value, notes, logged_at AS "loggedAt"
          FROM habit_entries
-         WHERE habit_id = ?
+         WHERE user_habit_id = $1
          ORDER BY logged_at DESC
-         LIMIT ?`,
+         LIMIT $2`,
         [habitId, limit]
       );
     }
@@ -186,6 +361,7 @@ app.get(
 
 app.post(
   '/api/habits/:habitId/logs',
+  authMiddleware,
   asyncHandler(async (req, res) => {
     const habitId = Number(req.params.habitId);
     if (Number.isNaN(habitId)) {
@@ -198,25 +374,37 @@ app.post(
       return res.status(400).json({ message: 'El valor del registro es obligatorio' });
     }
 
+    const habitOwnership = await query(
+      'SELECT id FROM user_habits WHERE id = $1 AND user_id = $2',
+      [habitId, req.userId]
+    );
+
+    if (!habitOwnership.length) {
+      return res.status(404).json({ message: 'Hábito no encontrado' });
+    }
+
     const timestamp = loggedAt ? dayjs(loggedAt) : dayjs();
     if (!timestamp.isValid()) {
       return res.status(400).json({ message: 'Fecha y hora inválidas' });
     }
 
     const entryDate = timestamp.format('YYYY-MM-DD');
-    const entryTimestamp = timestamp.format('YYYY-MM-DD HH:mm:ss');
+    const entryTimestamp = timestamp.toISOString();
 
     const result = await query(
-      `INSERT INTO habit_entries (habit_id, entry_date, logged_at, value, notes)
-       VALUES (?, ?, ?, ?, ?)`
-        ,
+      `INSERT INTO habit_entries (user_habit_id, entry_date, logged_at, value, notes)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
       [habitId, entryDate, entryTimestamp, Number(value), notes ?? null]
     );
 
-    const insertedId = result.insertId;
+    const [inserted] = result;
+    if (!inserted) {
+      return res.status(500).json({ message: 'No se pudo crear el registro de hábito' });
+    }
 
     res.status(201).json({
-      id: insertedId,
+      id: inserted.id,
       habitId,
       value: Number(value),
       notes: notes ?? null,
@@ -228,13 +416,14 @@ app.post(
 
 app.get(
   '/api/notifications',
+  authMiddleware,
   asyncHandler(async (req, res) => {
-    const userId = Number(req.query.userId ?? 1);
+    const userId = req.userId;
     const includeRead = req.query.includeRead === 'true';
     const typeFilter = req.query.type ?? null;
 
     let sql =
-      'SELECT id, habit_id AS habitId, title, message, type, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt FROM notifications WHERE user_id = ?';
+      'SELECT id, user_habit_id AS "habitId", title, message, type, channel, scheduled_for AS "scheduledFor", read_at AS "readAt", created_at AS "createdAt" FROM notifications WHERE user_id = $1';
     const params = [userId];
 
     if (!includeRead) {
@@ -242,8 +431,8 @@ app.get(
     }
 
     if (typeFilter) {
-      sql += ' AND type = ?';
       params.push(typeFilter);
+      sql += ` AND type = $${params.length}`;
     }
 
     sql += ' ORDER BY COALESCE(scheduled_for, created_at) ASC';
@@ -261,20 +450,27 @@ app.get(
 
 app.patch(
   '/api/notifications/:notificationId/read',
+  authMiddleware,
   asyncHandler(async (req, res) => {
     const notificationId = Number(req.params.notificationId);
     if (Number.isNaN(notificationId)) {
       return res.status(400).json({ message: 'NotificationId inválido' });
     }
 
-    await query(
+    const result = await query(
       `UPDATE notifications
-       SET read_at = NOW()
-       WHERE id = ?` ,
-      [notificationId]
+       SET read_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND user_id = $2
+       RETURNING read_at AS "readAt"`,
+      [notificationId, req.userId]
     );
 
-    res.json({ id: notificationId, readAt: dayjs().format('YYYY-MM-DD HH:mm:ss') });
+    const [updated] = result;
+    if (!updated) {
+      return res.status(404).json({ message: 'Notificación no encontrada' });
+    }
+
+    res.json({ id: notificationId, readAt: updated.readAt ?? dayjs().toISOString() });
   })
 );
 

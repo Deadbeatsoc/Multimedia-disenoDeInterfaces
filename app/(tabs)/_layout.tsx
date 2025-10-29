@@ -1,8 +1,15 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import { Platform } from 'react-native';
 import { Chrome as Home, Target, TrendingUp, User } from 'lucide-react-native';
+import { useAppContext } from '@/context/AppContext';
 
 export default function TabLayout() {
+  const { user } = useAppContext();
+
+  if (!user) {
+    return <Redirect href="/" />;
+  }
+
   return (
     <Tabs
       screenOptions={{
