@@ -221,9 +221,17 @@ export default function Profile() {
         <View style={styles.sessionSection}>
           <TouchableOpacity
             style={styles.logoutButton}
-            onPress={() => {
-              signOut();
-              router.replace('/');
+            onPress={async () => {
+              try {
+                await signOut();
+                router.replace('/');
+              } catch (error) {
+                setMessage(
+                  error instanceof Error
+                    ? error.message
+                    : 'No se pudo cerrar sesión. Intenta nuevamente.'
+                );
+              }
             }}>
             <LogOut size={18} color="#FFFFFF" />
             <Text style={styles.logoutButtonText}>Cerrar sesión</Text>
