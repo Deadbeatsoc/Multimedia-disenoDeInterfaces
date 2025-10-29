@@ -19,12 +19,14 @@ import {
   Mail,
   LogOut,
 } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import { ProfileCard } from '@/components/ProfileCard';
 import { SettingsItem } from '@/components/SettingsItem';
 import { colors, spacing } from '@/constants/theme';
 import { useAppContext } from '@/context/AppContext';
 
 export default function Profile() {
+  const router = useRouter();
   const { user, updateProfile, dashboard, signOut } = useAppContext();
   const [form, setForm] = useState({
     username: '',
@@ -217,7 +219,12 @@ export default function Profile() {
         </View>
 
         <View style={styles.sessionSection}>
-          <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={() => {
+              signOut();
+              router.replace('/');
+            }}>
             <LogOut size={18} color="#FFFFFF" />
             <Text style={styles.logoutButtonText}>Cerrar sesión</Text>
           </TouchableOpacity>

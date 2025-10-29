@@ -17,7 +17,8 @@ import { colors, spacing } from '@/constants/theme';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { user, signIn, isLoading } = useAppContext();
+  const { user, signIn, authenticate, isLoading } = useAppContext();
+  const [mode, setMode] = useState<'register' | 'login'>('register');
   const [step, setStep] = useState(1);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -46,6 +47,15 @@ export default function LoginScreen() {
       numericAge > 0
     );
   }, [age, canContinueStepOne, height, weight]);
+
+  const handleModeChange = (nextMode: 'register' | 'login') => {
+    if (nextMode === mode) {
+      return;
+    }
+    setMode(nextMode);
+    setError(null);
+    setStep(1);
+  };
 
   const handleContinue = () => {
     if (!canContinueStepOne) {
@@ -81,6 +91,29 @@ export default function LoginScreen() {
     }
   };
 
+  const canLogin = useMemo(
+    () => email.trim() !== '' && password.trim().length >= 6,
+    [email, password]
+  );
+
+  const handleLogin = () => {
+    if (!canLogin) {
+      setError('Ingresa tu correo y contraseña para continuar.');
+      return;
+    }
+
+    try {
+      authenticate({ email: email.trim(), password });
+      router.replace('/(tabs)');
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'No pudimos validar tus credenciales. Intenta nuevamente.'
+      );
+    }
+  };
+
   if (user) {
     return <Redirect href="/(tabs)" />;
   }
@@ -101,22 +134,112 @@ export default function LoginScreen() {
             </Text>
           </View>
 
-          <View style={styles.stepIndicator}>
-            <View style={[styles.stepBullet, step >= 1 && styles.stepBulletActive]} />
-            <View style={styles.stepLine} />
-            <View style={[styles.stepBullet, step >= 2 && styles.stepBulletActive]} />
+          <View style={styles.modeSwitch}>
+            <TouchableOpacity
+              style={[styles.modeButton, mode === 'login' && styles.modeButtonActive]}
+              onPress={() => handleModeChange('login')}>
+              <Text style={[styles.modeButtonText, mode === 'login' && styles.modeButtonTextActive]}>
+                Iniciar sesión
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeButton, mode === 'register' && styles.modeButtonActive]}
+              onPress={() => handleModeChange('register')}>
+              <Text
+                style={[styles.modeButtonText, mode === 'register' && styles.modeButtonTextActive]}>
+                Crear cuenta
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          {step === 1 ? (
+          {mode === 'register' ? (
+            <>
+              <View style={styles.stepIndicator}>
+                <View style={[styles.stepBullet, step >= 1 && styles.stepBulletActive]} />
+                <View style={styles.stepLine} />
+                <View style={[styles.stepBullet, step >= 2 && styles.stepBulletActive]} />
+              </View>
+
+              {step === 1 ? (
+                <View style={styles.formCard}>
+                  <Text style={styles.formTitle}>Crea tu cuenta</Text>
+                  <InputField
+                    label="Nombre de usuario"
+                    value={username}
+                    onChangeText={setUsername}
+                    placeholder="tu_usuario"
+                    icon={<User size={18} color={colors.gray[500]} />}
+                  />
+                  <InputField
+                    label="Correo electrónico"
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="correo@ejemplo.com"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    icon={<Mail size={18} color={colors.gray[500]} />}
+                  />
+                  <InputField
+                    label="Contraseña"
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Al menos 6 caracteres"
+                    secureTextEntry
+                    icon={<Lock size={18} color={colors.gray[500]} />}
+                  />
+
+                  <TouchableOpacity
+                    style={[styles.primaryButton, !canContinueStepOne && styles.buttonDisabled]}
+                    onPress={handleContinue}
+                    disabled={!canContinueStepOne || isLoading}>
+                    <Text style={styles.primaryButtonText}>Continuar</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.formCard}>
+                  <Text style={styles.formTitle}>Personaliza tus metas</Text>
+                  <InputField
+                    label="Altura (cm)"
+                    value={height}
+                    onChangeText={setHeight}
+                    placeholder="Ej. 170"
+                    keyboardType="numeric"
+                    icon={<Ruler size={18} color={colors.gray[500]} />}
+                  />
+                  <InputField
+                    label="Peso (kg)"
+                    value={weight}
+                    onChangeText={setWeight}
+                    placeholder="Ej. 65"
+                    keyboardType="numeric"
+                    icon={<Scale size={18} color={colors.gray[500]} />}
+                  />
+                  <InputField
+                    label="Edad"
+                    value={age}
+                    onChangeText={setAge}
+                    placeholder="Ej. 28"
+                    keyboardType="numeric"
+                    icon={<Calendar size={18} color={colors.gray[500]} />}
+                  />
+
+                  <View style={styles.actionsRow}>
+                    <TouchableOpacity style={styles.secondaryButton} onPress={() => setStep(1)}>
+                      <Text style={styles.secondaryButtonText}>Volver</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.primaryButton, !canSubmit && styles.buttonDisabled]}
+                      onPress={handleSubmit}
+                      disabled={!canSubmit || isLoading}>
+                      <Text style={styles.primaryButtonText}>Empezar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </>
+          ) : (
             <View style={styles.formCard}>
-              <Text style={styles.formTitle}>Crea tu cuenta</Text>
-              <InputField
-                label="Nombre de usuario"
-                value={username}
-                onChangeText={setUsername}
-                placeholder="tu_usuario"
-                icon={<User size={18} color={colors.gray[500]} />}
-              />
+              <Text style={styles.formTitle}>Bienvenido de nuevo</Text>
               <InputField
                 label="Correo electrónico"
                 value={email}
@@ -130,57 +253,17 @@ export default function LoginScreen() {
                 label="Contraseña"
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Al menos 6 caracteres"
+                placeholder="Tu contraseña"
                 secureTextEntry
                 icon={<Lock size={18} color={colors.gray[500]} />}
               />
 
               <TouchableOpacity
-                style={[styles.primaryButton, !canContinueStepOne && styles.buttonDisabled]}
-                onPress={handleContinue}
-                disabled={!canContinueStepOne || isLoading}>
-                <Text style={styles.primaryButtonText}>Continuar</Text>
+                style={[styles.primaryButton, !canLogin && styles.buttonDisabled]}
+                onPress={handleLogin}
+                disabled={!canLogin || isLoading}>
+                <Text style={styles.primaryButtonText}>Entrar</Text>
               </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.formCard}>
-              <Text style={styles.formTitle}>Personaliza tus metas</Text>
-              <InputField
-                label="Altura (cm)"
-                value={height}
-                onChangeText={setHeight}
-                placeholder="Ej. 170"
-                keyboardType="numeric"
-                icon={<Ruler size={18} color={colors.gray[500]} />}
-              />
-              <InputField
-                label="Peso (kg)"
-                value={weight}
-                onChangeText={setWeight}
-                placeholder="Ej. 65"
-                keyboardType="numeric"
-                icon={<Scale size={18} color={colors.gray[500]} />}
-              />
-              <InputField
-                label="Edad"
-                value={age}
-                onChangeText={setAge}
-                placeholder="Ej. 28"
-                keyboardType="numeric"
-                icon={<Calendar size={18} color={colors.gray[500]} />}
-              />
-
-              <View style={styles.actionsRow}>
-                <TouchableOpacity style={styles.secondaryButton} onPress={() => setStep(1)}>
-                  <Text style={styles.secondaryButtonText}>Volver</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.primaryButton, !canSubmit && styles.buttonDisabled]}
-                  onPress={handleSubmit}
-                  disabled={!canSubmit || isLoading}>
-                  <Text style={styles.primaryButtonText}>Empezar</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           )}
 
@@ -258,6 +341,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: colors.gray[600],
     lineHeight: 22,
+  },
+  modeSwitch: {
+    flexDirection: 'row',
+    backgroundColor: colors.gray[100],
+    borderRadius: 16,
+    padding: 4,
+  },
+  modeButton: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  modeButtonActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  modeButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.gray[600],
+  },
+  modeButtonTextActive: {
+    color: colors.blue.main,
   },
   stepIndicator: {
     flexDirection: 'row',

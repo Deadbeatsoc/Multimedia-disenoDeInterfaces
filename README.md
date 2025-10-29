@@ -27,11 +27,16 @@ Este repositorio ahora incluye la definición de la base de datos MySQL y un ser
 2. Ejecuta el script [`database/schema.sql`](database/schema.sql) para crear la base de datos `habit_tracker`, las tablas y los datos de ejemplo.
 3. Opcionalmente ajusta los datos iniciales (usuarios, hábitos, notificaciones) según tus necesidades.
 
-El esquema incluye las tablas:
-- `users`: información básica del usuario.
-- `habits`: hábitos configurados (slug, colores, meta, etc.).
-- `habit_entries`: registros históricos y diarios de progreso.
-- `notifications`: recordatorios, logros y alertas asociadas a los hábitos.
+El esquema incluye tablas normalizadas para cubrir los diferentes flujos de la aplicación:
+- `users`: datos de acceso y biometría (usuario, correo, contraseña en hash, altura, peso, edad, huso horario).
+- `user_metrics`: histórico opcional de medidas, metas recomendadas y notas de seguimiento.
+- `habit_types`: catálogo de hábitos soportados (agua, sueño, ejercicio, alimentación).
+- `user_habits`: instancia de cada hábito que configura una persona, con metas, recordatorios y metadatos.
+- `water_settings`, `sleep_schedules`, `exercise_preferences`, `nutrition_meals`: parámetros específicos de cada tipo de hábito.
+- `habit_entries`: registros diarios con origen, notas y valores numéricos para el progreso.
+- `habit_reminders`: programación recurrente de alertas por día y frecuencia.
+- `notifications`: mensajes enviados (recordatorios, logros, alertas) incluyendo el canal.
+- `notification_channels`: direcciones verificadas para push, correo o SMS.
 
 ## 2. Servidor API (Express + MySQL)
 

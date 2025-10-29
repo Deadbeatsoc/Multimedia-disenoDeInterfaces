@@ -48,11 +48,17 @@ interface SignInPayload {
   age: number;
 }
 
+interface SignInCredentials {
+  email: string;
+  password: string;
+}
+
 interface AppContextValue {
   user: UserProfile | null;
   dashboard: DashboardState;
   isLoading: boolean;
   signIn: (payload: SignInPayload) => void;
+  authenticate: (credentials: SignInCredentials) => void;
   signOut: () => void;
   updateProfile: (updates: Partial<UserProfile>) => void;
   logHabitEntry: (slug: HabitSlug, value: number, notes?: string) => HabitLog;
@@ -191,6 +197,7 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function AppProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [registeredUsers, setRegisteredUsers] = useState<Record<string, UserProfile>>({});
   const [settings, setSettings] = useState<HabitSettingsMap>(() => createDefaultSettings(2000));
   const [habits, setHabits] = useState<Record<HabitSlug, HabitState>>(() => {
     const initialSettings = createDefaultSettings(2000);
@@ -269,6 +276,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           title,
           message,
           type: 'reminder',
+          channel: 'in_app',
           scheduledFor: scheduled.toISOString(),
           read: false,
         });
@@ -321,6 +329,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           title: '🎉 ¡Objetivo alcanzado!',
           message,
           type: 'achievement',
+          channel: 'in_app',
           scheduledFor: null,
           read: false,
           createdAt: new Date().toISOString(),
@@ -435,6 +444,11 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const signIn = useCallback<AppContextValue['signIn']>(
     ({ username, email, password, height, weight, age }) => {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (registeredUsers[normalizedEmail]) {
+        throw new Error('Ya existe una cuenta registrada con este correo electrónico.');
+      }
+
       setIsLoading(true);
       const recommended = computeRecommendedWater(height, weight);
       const nextSettings = createDefaultSettings(recommended);
@@ -479,15 +493,94 @@ export function AppProvider({ children }: PropsWithChildren) {
           title: '👋 ¡Bienvenido!',
           message: 'Configura tus hábitos para recibir recordatorios personalizados.',
           type: 'alert',
+          channel: 'in_app',
           scheduledFor: null,
           read: false,
           createdAt: new Date().toISOString(),
         },
       ]);
-      setUser({ username, email, password, height, weight, age });
+      const profile: UserProfile = {
+        username,
+        email,
+        password,
+        height,
+        weight,
+        age,
+      };
+      setUser(profile);
+      setRegisteredUsers((prev) => ({
+        ...prev,
+        [normalizedEmail]: profile,
+      }));
       setIsLoading(false);
     },
-    [rebuildReminders]
+    [rebuildReminders, registeredUsers]
+  );
+
+  const authenticate = useCallback<AppContextValue['authenticate']>(
+    ({ email, password }) => {
+      setIsLoading(true);
+      const normalizedEmail = email.trim().toLowerCase();
+      const record = registeredUsers[normalizedEmail];
+
+      if (!record || record.password !== password) {
+        setIsLoading(false);
+        throw new Error('Correo o contraseña incorrectos.');
+      }
+
+      const recommended = computeRecommendedWater(record.height, record.weight);
+      const nextSettings = createDefaultSettings(recommended);
+
+      const nextHabits: Record<HabitSlug, HabitState> = {
+        water: {
+          summary: createHabitSummary('water', resolveTargetFromSettings('water', nextSettings)),
+          history: [],
+          settings: nextSettings.water,
+        },
+        sleep: {
+          summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', nextSettings)),
+          history: [],
+          settings: nextSettings.sleep,
+        },
+        exercise: {
+          summary: createHabitSummary(
+            'exercise',
+            resolveTargetFromSettings('exercise', nextSettings)
+          ),
+          history: [],
+          settings: nextSettings.exercise,
+        },
+        nutrition: {
+          summary: createHabitSummary(
+            'nutrition',
+            resolveTargetFromSettings('nutrition', nextSettings)
+          ),
+          history: [],
+          settings: nextSettings.nutrition,
+        },
+      };
+
+      setSettings(nextSettings);
+      setHabits(nextHabits);
+      setDailySnapshots({});
+      rebuildReminders(nextHabits, nextSettings);
+      setNotifications([
+        {
+          id: nextNotificationId.current++,
+          habitId: null,
+          title: '👋 ¡Bienvenido de nuevo!',
+          message: 'Revisa tus hábitos para continuar con tu progreso.',
+          type: 'alert',
+          channel: 'in_app',
+          scheduledFor: null,
+          read: false,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      setUser(record);
+      setIsLoading(false);
+    },
+    [rebuildReminders, registeredUsers]
   );
 
   const signOut = useCallback<AppContextValue['signOut']>(() => {
@@ -551,6 +644,16 @@ export function AppProvider({ children }: PropsWithChildren) {
             },
           });
         }
+        const previousKey = prev.email.trim().toLowerCase();
+        const nextKey = next.email.trim().toLowerCase();
+        setRegisteredUsers((records) => {
+          const nextRecords = { ...records };
+          if (previousKey && previousKey !== nextKey) {
+            delete nextRecords[previousKey];
+          }
+          nextRecords[nextKey] = next;
+          return nextRecords;
+        });
         return next;
       });
     },
@@ -678,6 +781,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       dashboard,
       isLoading,
       signIn,
+      authenticate,
       signOut,
       updateProfile,
       logHabitEntry,
@@ -698,6 +802,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       markNotificationAsRead,
       refreshReminders,
       signOut,
+      authenticate,
       signIn,
       updateExerciseSettings,
       updateMealTime,
