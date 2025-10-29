@@ -52,10 +52,18 @@ app.get(
     const date = requestedDate.format('YYYY-MM-DD');
 
     const habits = await query(
-      `SELECT id, slug, name, icon, color, target_value AS targetValue, target_unit AS targetUnit
-       FROM habits
-       WHERE user_id = ?
-       ORDER BY id ASC`,
+      `SELECT
+         uh.id,
+         ht.slug,
+         COALESCE(uh.custom_name, ht.name) AS name,
+         ht.icon,
+         ht.color,
+         uh.target_value AS targetValue,
+         uh.target_unit AS targetUnit
+       FROM user_habits AS uh
+       INNER JOIN habit_types AS ht ON ht.id = uh.habit_type_id
+       WHERE uh.user_id = ?
+       ORDER BY uh.id ASC`,
       [userId]
     );
 
@@ -71,10 +79,10 @@ app.get(
     }
 
     const entries = await query(
-      `SELECT habit_id AS habitId, SUM(value) AS totalValue
+      `SELECT user_habit_id AS habitId, SUM(value) AS totalValue
        FROM habit_entries
        WHERE entry_date = ?
-       GROUP BY habit_id`,
+       GROUP BY user_habit_id`,
       [date]
     );
 
@@ -103,7 +111,7 @@ app.get(
     });
 
     const notifications = await query(
-      `SELECT id, habit_id AS habitId, title, message, type, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt
+      `SELECT id, user_habit_id AS habitId, title, message, type, channel, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt
        FROM notifications
        WHERE user_id = ?
        ORDER BY COALESCE(scheduled_for, created_at) ASC
@@ -155,17 +163,17 @@ app.get(
     let logs;
     if (dateFilter) {
       logs = await query(
-        `SELECT id, habit_id AS habitId, value, notes, logged_at AS loggedAt
+        `SELECT id, user_habit_id AS habitId, value, notes, logged_at AS loggedAt
          FROM habit_entries
-         WHERE habit_id = ? AND entry_date = ?
+         WHERE user_habit_id = ? AND entry_date = ?
          ORDER BY logged_at DESC`,
         [habitId, dateFilter.format('YYYY-MM-DD')]
       );
     } else {
       logs = await query(
-        `SELECT id, habit_id AS habitId, value, notes, logged_at AS loggedAt
+        `SELECT id, user_habit_id AS habitId, value, notes, logged_at AS loggedAt
          FROM habit_entries
-         WHERE habit_id = ?
+         WHERE user_habit_id = ?
          ORDER BY logged_at DESC
          LIMIT ?`,
         [habitId, limit]
@@ -207,7 +215,7 @@ app.post(
     const entryTimestamp = timestamp.format('YYYY-MM-DD HH:mm:ss');
 
     const result = await query(
-      `INSERT INTO habit_entries (habit_id, entry_date, logged_at, value, notes)
+      `INSERT INTO habit_entries (user_habit_id, entry_date, logged_at, value, notes)
        VALUES (?, ?, ?, ?, ?)`
         ,
       [habitId, entryDate, entryTimestamp, Number(value), notes ?? null]
@@ -234,7 +242,7 @@ app.get(
     const typeFilter = req.query.type ?? null;
 
     let sql =
-      'SELECT id, habit_id AS habitId, title, message, type, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt FROM notifications WHERE user_id = ?';
+      'SELECT id, user_habit_id AS habitId, title, message, type, channel, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt FROM notifications WHERE user_id = ?';
     const params = [userId];
 
     if (!includeRead) {
