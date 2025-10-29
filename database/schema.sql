@@ -36,7 +36,11 @@ CREATE TABLE users (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+  height_cm INTEGER,
+  weight_kg INTEGER,
+  age INTEGER,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE user_metrics (
@@ -121,7 +125,7 @@ CREATE TABLE habit_entries (
   entry_date DATE NOT NULL,
   logged_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   value NUMERIC(10, 2) NOT NULL,
-  notes VARCHAR(255),
+  notes TEXT,
   source habit_entry_source_enum DEFAULT 'manual',
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP

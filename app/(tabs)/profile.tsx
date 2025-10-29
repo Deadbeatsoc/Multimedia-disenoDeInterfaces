@@ -36,6 +36,7 @@ export default function Profile() {
     age: '',
   });
   const [message, setMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -63,7 +64,7 @@ export default function Profile() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.username.trim() || !form.email.trim()) {
       setMessage('El nombre de usuario y el correo son obligatorios.');
       return;
@@ -78,14 +79,31 @@ export default function Profile() {
       return;
     }
 
-    updateProfile({
-      username: form.username.trim(),
-      email: form.email.trim(),
-      height,
-      weight,
-      age,
-    });
-    setMessage('Perfil actualizado. Tus recomendaciones se han recalculado.');
+    try {
+      setIsSaving(true);
+      const updated = await updateProfile({
+        username: form.username.trim(),
+        height,
+        weight,
+        age,
+      });
+      setForm({
+        username: updated.username,
+        email: updated.email,
+        height: String(updated.height),
+        weight: String(updated.weight),
+        age: String(updated.age),
+      });
+      setMessage('Perfil actualizado. Tus recomendaciones se han recalculado.');
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo actualizar el perfil. Intenta nuevamente.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (!user) {
@@ -157,8 +175,13 @@ export default function Profile() {
                 style={styles.inlineInput}
               />
             </View>
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.saveButtonText}>Guardar cambios</Text>
+            <TouchableOpacity
+              style={[styles.saveButton, isSaving && styles.buttonDisabled]}
+              onPress={handleSave}
+              disabled={isSaving}>
+              <Text style={styles.saveButtonText}>
+                {isSaving ? 'Guardando...' : 'Guardar cambios'}
+              </Text>
             </TouchableOpacity>
             {message && <Text style={styles.feedback}>{message}</Text>}
           </View>
@@ -361,6 +384,9 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   feedback: {
     fontSize: 12,

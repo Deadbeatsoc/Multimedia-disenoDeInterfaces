@@ -161,7 +161,7 @@ export default function Habits() {
 
     try {
       setIsLogging(true);
-      const log = logHabitEntry(habit.slug, value, notes);
+      const log = await logHabitEntry(habit.slug, value, notes);
       await refresh();
       return log;
     } catch (error) {
@@ -195,7 +195,7 @@ export default function Habits() {
     ? getHabitHistory(selectedHabitSummary.slug)
     : [];
 
-  const handleSaveWaterSettings = () => {
+  const handleSaveWaterSettings = async () => {
     const interval = Number(waterInterval);
     if (!Number.isFinite(interval) || interval <= 0) {
       Alert.alert('Aviso', 'El intervalo debe ser un número positivo.');
@@ -210,18 +210,25 @@ export default function Habits() {
 
     setIsUpdatingSettings(true);
     try {
-      updateWaterSettings({
+      await updateWaterSettings({
         reminderIntervalMinutes: interval,
         useRecommendedTarget: waterGoalType === 'recommended',
         customTarget: waterGoalType === 'custom' ? customTarget : null,
       });
       Alert.alert('Listo', 'Actualizamos tu meta de hidratación.');
+    } catch (error) {
+      Alert.alert(
+        'Error',
+        error instanceof Error
+          ? error.message
+          : 'No pudimos guardar los cambios de hidratación.'
+      );
     } finally {
       setIsUpdatingSettings(false);
     }
   };
 
-  const handleSaveSleepSettings = () => {
+  const handleSaveSleepSettings = async () => {
     const advance = Number(sleepForm.reminderAdvanceMinutes);
     if (!Number.isFinite(advance) || advance < 0) {
       Alert.alert('Aviso', 'El recordatorio debe tener un margen válido.');
@@ -230,19 +237,26 @@ export default function Habits() {
 
     setIsUpdatingSettings(true);
     try {
-      updateSleepSettings({
+      await updateSleepSettings({
         bedTime: sleepForm.bedTime,
         wakeTime: sleepForm.wakeTime,
         reminderEnabled: sleepForm.reminderEnabled,
         reminderAdvanceMinutes: advance,
       });
       Alert.alert('Listo', 'Guardamos tu rutina de sueño.');
+    } catch (error) {
+      Alert.alert(
+        'Error',
+        error instanceof Error
+          ? error.message
+          : 'No pudimos guardar tu rutina de sueño.'
+      );
     } finally {
       setIsUpdatingSettings(false);
     }
   };
 
-  const handleSaveNutritionSettings = () => {
+  const handleSaveNutritionSettings = async () => {
     const meals = nutritionForm.meals.map((meal) => ({
       ...meal,
       time: meal.localTime,
@@ -250,17 +264,24 @@ export default function Habits() {
 
     setIsUpdatingSettings(true);
     try {
-      updateNutritionSettings({
+      await updateNutritionSettings({
         remindersEnabled: nutritionForm.remindersEnabled,
         meals,
       });
       Alert.alert('Listo', 'Configuramos tus recordatorios de comida.');
+    } catch (error) {
+      Alert.alert(
+        'Error',
+        error instanceof Error
+          ? error.message
+          : 'No pudimos guardar tus recordatorios de comida.'
+      );
     } finally {
       setIsUpdatingSettings(false);
     }
   };
 
-  const handleSaveExerciseSettings = () => {
+  const handleSaveExerciseSettings = async () => {
     const goal = Number(exerciseForm.dailyGoalMinutes);
     if (!Number.isFinite(goal) || goal <= 0) {
       Alert.alert('Aviso', 'Indica una meta de minutos válida.');
@@ -269,12 +290,19 @@ export default function Habits() {
 
     setIsUpdatingSettings(true);
     try {
-      updateExerciseSettings({
+      await updateExerciseSettings({
         dailyGoalMinutes: goal,
         reminderEnabled: exerciseForm.reminderEnabled,
         reminderTime: exerciseForm.reminderTime,
       });
       Alert.alert('Listo', 'Actualizamos tu rutina de ejercicio.');
+    } catch (error) {
+      Alert.alert(
+        'Error',
+        error instanceof Error
+          ? error.message
+          : 'No pudimos guardar tu rutina de ejercicio.'
+      );
     } finally {
       setIsUpdatingSettings(false);
     }

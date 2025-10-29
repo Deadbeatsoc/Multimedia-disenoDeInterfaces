@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useAppContext } from '@/context/AppContext';
 import { DashboardResponse, NotificationItem } from '@/types/api';
@@ -13,40 +12,9 @@ interface UseDashboardDataResult {
   refresh: () => Promise<void>;
 }
 
-const resolveApiUrl = () => {
-  const extra =
-    Constants?.expoConfig?.extra ??
-    ((Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra ?? {});
-  return (extra?.apiUrl as string | undefined) ?? process.env.EXPO_PUBLIC_API_URL ?? '';
-};
-
-const API_URL = resolveApiUrl();
-
-const parseErrorResponse = async (response: Response) => {
-  const fallback = 'No se pudo completar la solicitud. Intenta nuevamente.';
-  const text = await response.text();
-  if (!text) {
-    return fallback;
-  }
-
-  try {
-    const data = JSON.parse(text);
-    if (typeof data?.message === 'string') {
-      return data.message;
-    }
-    if (typeof data?.error === 'string') {
-      return data.error;
-    }
-  } catch {
-    return text;
-  }
-
-  return fallback;
-};
-
 export function useDashboardData(): UseDashboardDataResult {
   const router = useRouter();
-  const { token, refreshReminders, signOut } = useAppContext();
+  const { token, refreshReminders, signOut, request } = useAppContext();
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -74,13 +42,13 @@ export function useDashboardData(): UseDashboardDataResult {
       }
 
       try {
-        const response = await fetch(`${API_URL}/dashboard`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.status === 401) {
+        const payload = await request<DashboardResponse>('/dashboard');
+        setData(payload);
+        setNotifications(payload.notifications ?? []);
+        setError(null);
+      } catch (err) {
+        const status = (err as { status?: number }).status;
+        if (status === 401) {
           setError('Tu sesión ha expirado. Vuelve a iniciar sesión.');
           setData(null);
           setNotifications([]);
@@ -89,16 +57,6 @@ export function useDashboardData(): UseDashboardDataResult {
           return;
         }
 
-        if (!response.ok) {
-          const message = await parseErrorResponse(response);
-          throw new Error(message);
-        }
-
-        const payload = (await response.json()) as DashboardResponse;
-        setData(payload);
-        setNotifications(payload.notifications ?? []);
-        setError(null);
-      } catch (err) {
         setError(
           err instanceof Error ? err.message : 'No se pudo cargar la información.'
         );
@@ -110,7 +68,7 @@ export function useDashboardData(): UseDashboardDataResult {
         }
       }
     },
-    [token, router, signOut]
+    [token, router, signOut, request]
   );
 
   useEffect(() => {
