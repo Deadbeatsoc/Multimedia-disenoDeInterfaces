@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import dayjs from 'dayjs';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { query } from './db.js';
+import { getClient, query } from './db.js';
 
 dotenv.config();
 
@@ -40,12 +40,39 @@ const formatProgressText = (value, target, unit) => {
   return `${roundedValue} ${unit} de ${roundedTarget} ${unit}`;
 };
 
+const toIntegerOrNull = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+};
+
+const toNumberOrNull = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const toPublicUser = (row) => ({
   id: row.id,
   name: row.name,
   email: row.email,
+  height: toIntegerOrNull(row.height ?? row.height_cm),
+  weight: toIntegerOrNull(row.weight ?? row.weight_kg),
+  age: toIntegerOrNull(row.age),
   createdAt: row.createdAt ?? row.created_at,
+  updatedAt: row.updatedAt ?? row.updated_at,
 });
+
+const computeRecommendedWater = (heightCm, weightKg) => {
+  const height = Number(heightCm);
+  const weight = Number(weightKg);
+
+  if (!Number.isFinite(height) || !Number.isFinite(weight)) {
+    return 2000;
+  }
+
+  const base = weight * 35;
+  const heightAdjustment = Math.max(0, height - 150) * 5;
+  return Math.round(base + heightAdjustment);
+};
 
 const createToken = (userId) =>
   jwt.sign(
@@ -92,13 +119,25 @@ app.get('/api/health', (req, res) => {
 app.post(
   '/api/auth/register',
   asyncHandler(async (req, res) => {
-    const { name, email, password } = req.body ?? {};
+    const { name, email, password, height, weight, age } = req.body ?? {};
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios' });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+    const normalizedName = String(name).trim();
+    const numericHeight = height === undefined || height === null ? null : toIntegerOrNull(height);
+    const numericWeight = weight === undefined || weight === null ? null : toIntegerOrNull(weight);
+    const numericAge = age === undefined || age === null ? null : toIntegerOrNull(age);
+
+    if ((height !== undefined && numericHeight === null) || (weight !== undefined && numericWeight === null)) {
+      return res.status(400).json({ message: 'Altura y peso deben ser valores numéricos' });
+    }
+
+    if (age !== undefined && numericAge === null) {
+      return res.status(400).json({ message: 'Edad inválida' });
+    }
 
     const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
     if (existing.length) {
@@ -106,25 +145,177 @@ app.post(
     }
 
     const passwordHash = await bcrypt.hash(String(password), 10);
+    const client = await getClient();
 
-    const inserted = await query(
-      `INSERT INTO users (name, email, password_hash)
-       VALUES ($1, $2, $3)
-       RETURNING id, name, email, created_at AS "createdAt"`,
-      [String(name).trim(), normalizedEmail, passwordHash]
-    );
+    try {
+      await client.query('BEGIN');
 
-    const [user] = inserted;
-    if (!user) {
-      return res.status(500).json({ message: 'No se pudo crear el usuario' });
+      const userResult = await client.query(
+        `INSERT INTO users (name, email, password_hash, height_cm, weight_kg, age)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, email, height_cm AS "height", weight_kg AS "weight", age, created_at AS "createdAt", updated_at AS "updatedAt"`,
+        [normalizedName, normalizedEmail, passwordHash, numericHeight, numericWeight, numericAge]
+      );
+
+      const [user] = userResult.rows;
+      if (!user) {
+        await client.query('ROLLBACK');
+        return res.status(500).json({ message: 'No se pudo crear el usuario' });
+      }
+
+      const habitTypesResult = await client.query(
+        `SELECT id, slug, default_unit AS "defaultUnit", default_target_value AS "defaultTarget"
+         FROM habit_types
+         WHERE slug = ANY($1)`,
+        [[
+          'water',
+          'sleep',
+          'exercise',
+          'nutrition',
+        ]]
+      );
+
+      const habitsBySlug = new Map(habitTypesResult.rows.map((row) => [row.slug, row]));
+      const waterType = habitsBySlug.get('water');
+      const sleepType = habitsBySlug.get('sleep');
+      const exerciseType = habitsBySlug.get('exercise');
+      const nutritionType = habitsBySlug.get('nutrition');
+
+      const waterGoal = computeRecommendedWater(numericHeight ?? 170, numericWeight ?? 65);
+      const timezone = 'UTC';
+
+      if (waterType) {
+        const waterHabit = await client.query(
+          `INSERT INTO user_habits (user_id, habit_type_id, target_value, target_unit, reminder_enabled, reminder_interval_minutes, timezone)
+           VALUES ($1, $2, $3, $4, TRUE, $5, $6)
+           RETURNING id`,
+          [user.id, waterType.id, waterGoal, waterType.defaultUnit, 120, timezone]
+        );
+
+        const [waterHabitRow] = waterHabit.rows;
+        if (waterHabitRow) {
+          await client.query(
+            `INSERT INTO water_settings (user_habit_id, use_recommended_target, recommended_target_ml, custom_target_ml, reminder_interval_minutes)
+             VALUES ($1, TRUE, $2, NULL, $3)
+             ON CONFLICT (user_habit_id)
+             DO UPDATE SET
+               use_recommended_target = EXCLUDED.use_recommended_target,
+               recommended_target_ml = EXCLUDED.recommended_target_ml,
+               custom_target_ml = EXCLUDED.custom_target_ml,
+               reminder_interval_minutes = EXCLUDED.reminder_interval_minutes,
+               last_recalculated_at = CURRENT_TIMESTAMP`,
+            [waterHabitRow.id, waterGoal, 120]
+          );
+        }
+      }
+
+      if (sleepType) {
+        const sleepHabit = await client.query(
+          `INSERT INTO user_habits (user_id, habit_type_id, target_value, target_unit, reminder_enabled, reminder_time, timezone)
+           VALUES ($1, $2, $3, $4, TRUE, TIME '22:30:00', $5)
+           RETURNING id`,
+          [user.id, sleepType.id, sleepType.defaultTarget ?? 8, sleepType.defaultUnit, timezone]
+        );
+
+        const [sleepHabitRow] = sleepHabit.rows;
+        if (sleepHabitRow) {
+          await client.query(
+            `INSERT INTO sleep_schedules (user_habit_id, bed_time, wake_time, reminder_enabled, reminder_advance_minutes)
+             VALUES ($1, TIME '22:30:00', TIME '06:30:00', TRUE, 30)
+             ON CONFLICT (user_habit_id)
+             DO UPDATE SET
+               bed_time = EXCLUDED.bed_time,
+               wake_time = EXCLUDED.wake_time,
+               reminder_enabled = EXCLUDED.reminder_enabled,
+               reminder_advance_minutes = EXCLUDED.reminder_advance_minutes`,
+            [sleepHabitRow.id]
+          );
+        }
+      }
+
+      if (exerciseType) {
+        const exerciseHabit = await client.query(
+          `INSERT INTO user_habits (user_id, habit_type_id, target_value, target_unit, reminder_enabled, reminder_time, timezone)
+           VALUES ($1, $2, $3, $4, TRUE, TIME '18:00:00', $5)
+           RETURNING id`,
+          [
+            user.id,
+            exerciseType.id,
+            exerciseType.defaultTarget ?? 30,
+            exerciseType.defaultUnit,
+            timezone,
+          ]
+        );
+
+        const [exerciseHabitRow] = exerciseHabit.rows;
+        if (exerciseHabitRow) {
+          await client.query(
+            `INSERT INTO exercise_preferences (user_habit_id, reminder_enabled, reminder_time, daily_goal_minutes)
+             VALUES ($1, TRUE, TIME '18:00:00', $2)
+             ON CONFLICT (user_habit_id)
+             DO UPDATE SET
+               reminder_enabled = EXCLUDED.reminder_enabled,
+               reminder_time = EXCLUDED.reminder_time,
+               daily_goal_minutes = EXCLUDED.daily_goal_minutes`,
+            [exerciseHabitRow.id, exerciseType.defaultTarget ?? 30]
+          );
+        }
+      }
+
+      if (nutritionType) {
+        const nutritionHabit = await client.query(
+          `INSERT INTO user_habits (user_id, habit_type_id, target_value, target_unit, reminder_enabled, timezone)
+           VALUES ($1, $2, $3, $4, TRUE, $5)
+           RETURNING id`,
+          [
+            user.id,
+            nutritionType.id,
+            nutritionType.defaultTarget ?? 3,
+            nutritionType.defaultUnit,
+            timezone,
+          ]
+        );
+
+        const [nutritionHabitRow] = nutritionHabit.rows;
+        if (nutritionHabitRow) {
+          const meals = [
+            { code: 'breakfast', label: 'Desayuno', time: '08:00:00' },
+            { code: 'lunch', label: 'Almuerzo', time: '13:00:00' },
+            { code: 'dinner', label: 'Cena', time: '20:00:00' },
+          ];
+
+          await client.query('DELETE FROM nutrition_meals WHERE user_habit_id = $1', [nutritionHabitRow.id]);
+
+          for (const meal of meals) {
+            await client.query(
+              `INSERT INTO nutrition_meals (user_habit_id, meal_code, label, scheduled_time, enabled, reminder_enabled)
+               VALUES ($1, $2, $3, $4::time, TRUE, TRUE)
+               ON CONFLICT (user_habit_id, meal_code)
+               DO UPDATE SET
+                 label = EXCLUDED.label,
+                 scheduled_time = EXCLUDED.scheduled_time,
+                 enabled = EXCLUDED.enabled,
+                 reminder_enabled = EXCLUDED.reminder_enabled`,
+              [nutritionHabitRow.id, meal.code, meal.label, meal.time]
+            );
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+
+      const token = createToken(user.id);
+      res.status(201).json({
+        token,
+        user: toPublicUser(user),
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error al registrar usuario:', error);
+      res.status(500).json({ message: 'No se pudo crear el usuario' });
+    } finally {
+      client.release();
     }
-
-    const token = createToken(user.id);
-
-    res.status(201).json({
-      token,
-      user: toPublicUser(user),
-    });
   })
 );
 
@@ -139,7 +330,7 @@ app.post(
 
     const normalizedEmail = String(email).trim().toLowerCase();
     const found = await query(
-      `SELECT id, name, email, password_hash AS "passwordHash", created_at AS "createdAt"
+      `SELECT id, name, email, password_hash AS "passwordHash", height_cm AS "height", weight_kg AS "weight", age, created_at AS "createdAt", updated_at AS "updatedAt"
        FROM users
        WHERE email = $1`,
       [normalizedEmail]
@@ -157,9 +348,11 @@ app.post(
 
     const token = createToken(user.id);
 
+    const { passwordHash: _passwordHash, ...rest } = user;
+
     res.json({
       token,
-      user: toPublicUser(user),
+      user: toPublicUser(rest),
     });
   })
 );
@@ -169,7 +362,7 @@ app.get(
   authMiddleware,
   asyncHandler(async (req, res) => {
     const result = await query(
-      `SELECT id, name, email, created_at AS "createdAt"
+      `SELECT id, name, email, height_cm AS "height", weight_kg AS "weight", age, created_at AS "createdAt", updated_at AS "updatedAt"
        FROM users
        WHERE id = $1`,
       [req.userId]
@@ -181,6 +374,527 @@ app.get(
     }
 
     res.json({ user: toPublicUser(user) });
+  })
+);
+
+app.patch(
+  '/api/auth/me',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const { name, height, weight, age } = req.body ?? {};
+
+    const updates = [];
+    const params = [];
+
+    if (name !== undefined) {
+      const normalizedName = String(name).trim();
+      if (!normalizedName) {
+        return res.status(400).json({ message: 'El nombre no puede estar vacío' });
+      }
+      params.push(normalizedName);
+      updates.push(`name = $${params.length}`);
+    }
+
+    if (height !== undefined) {
+      const numericHeight = toIntegerOrNull(height);
+      if (numericHeight === null) {
+        return res.status(400).json({ message: 'Altura inválida' });
+      }
+      params.push(numericHeight);
+      updates.push(`height_cm = $${params.length}`);
+    }
+
+    if (weight !== undefined) {
+      const numericWeight = toIntegerOrNull(weight);
+      if (numericWeight === null) {
+        return res.status(400).json({ message: 'Peso inválido' });
+      }
+      params.push(numericWeight);
+      updates.push(`weight_kg = $${params.length}`);
+    }
+
+    if (age !== undefined) {
+      const numericAge = toIntegerOrNull(age);
+      if (numericAge === null) {
+        return res.status(400).json({ message: 'Edad inválida' });
+      }
+      params.push(numericAge);
+      updates.push(`age = $${params.length}`);
+    }
+
+    if (!updates.length) {
+      return res.status(400).json({ message: 'No hay campos para actualizar' });
+    }
+
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+      params.push(req.userId);
+
+      const result = await client.query(
+        `UPDATE users
+         SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $${params.length}
+         RETURNING id, name, email, height_cm AS "height", weight_kg AS "weight", age, created_at AS "createdAt", updated_at AS "updatedAt"`,
+        params
+      );
+
+      const updatedUser = result.rows[0];
+      if (!updatedUser) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Usuario no encontrado' });
+      }
+
+      const waterHabitResult = await client.query(
+        `SELECT uh.id
+         FROM user_habits AS uh
+         INNER JOIN habit_types AS ht ON ht.id = uh.habit_type_id
+         WHERE uh.user_id = $1 AND ht.slug = 'water'
+         LIMIT 1`,
+        [req.userId]
+      );
+
+      const waterHabit = waterHabitResult.rows[0];
+      if (waterHabit) {
+        const waterGoal = computeRecommendedWater(updatedUser.height, updatedUser.weight);
+
+        const waterSettingsResult = await client.query(
+          `SELECT use_recommended_target AS "useRecommended", reminder_interval_minutes AS "reminderInterval"
+           FROM water_settings
+           WHERE user_habit_id = $1`,
+          [waterHabit.id]
+        );
+
+        const waterSettings = waterSettingsResult.rows[0];
+
+        await client.query(
+          `UPDATE water_settings
+           SET recommended_target_ml = $1, last_recalculated_at = CURRENT_TIMESTAMP
+           WHERE user_habit_id = $2`,
+          [waterGoal, waterHabit.id]
+        );
+
+        if (!waterSettings || waterSettings.useRecommended) {
+          await client.query(
+            `UPDATE user_habits
+             SET target_value = $1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [waterGoal, waterHabit.id]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+
+      res.json({ user: toPublicUser(updatedUser) });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error al actualizar perfil:', error);
+      res.status(500).json({ message: 'No se pudo actualizar el perfil' });
+    } finally {
+      client.release();
+    }
+  })
+);
+
+app.patch(
+  '/api/habits/settings',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const { type } = req.body ?? {};
+
+    if (!type || typeof type !== 'string') {
+      return res.status(400).json({ message: 'Tipo de hábito requerido' });
+    }
+
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      const habitResult = await client.query(
+        `SELECT uh.id, uh.target_value AS "targetValue", uh.reminder_interval_minutes AS "reminderInterval", ht.slug
+         FROM user_habits AS uh
+         INNER JOIN habit_types AS ht ON ht.id = uh.habit_type_id
+         WHERE uh.user_id = $1 AND ht.slug = $2
+         LIMIT 1`,
+        [req.userId, type]
+      );
+
+      const habit = habitResult.rows[0];
+      if (!habit) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Hábito no encontrado' });
+      }
+
+      let responsePayload = { type: habit.slug };
+
+      if (habit.slug === 'water') {
+        const userMetricsResult = await client.query(
+          `SELECT height_cm AS "height", weight_kg AS "weight"
+           FROM users
+           WHERE id = $1`,
+          [req.userId]
+        );
+
+        const metrics = userMetricsResult.rows[0] ?? { height: null, weight: null };
+        const previousSettingsResult = await client.query(
+          `SELECT use_recommended_target AS "useRecommendedTarget",
+                  recommended_target_ml AS "recommendedTarget",
+                  custom_target_ml AS "customTarget",
+                  reminder_interval_minutes AS "reminderInterval"
+           FROM water_settings
+           WHERE user_habit_id = $1`,
+          [habit.id]
+        );
+
+        const previous = previousSettingsResult.rows[0] ?? {};
+
+        const fallbackReminder =
+          previous.reminderInterval ?? habit.reminderInterval ?? 120;
+
+        const useRecommendedTarget =
+          req.body.useRecommendedTarget !== undefined
+            ? Boolean(req.body.useRecommendedTarget)
+            : previous.useRecommendedTarget ?? true;
+
+        const requestedTarget =
+          req.body.targetValue !== undefined ? toIntegerOrNull(req.body.targetValue) : null;
+
+        if (req.body.targetValue !== undefined && (requestedTarget === null || requestedTarget <= 0)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ message: 'Meta de hábito inválida' });
+        }
+
+        let customTarget =
+          req.body.customTarget !== undefined
+            ? toIntegerOrNull(req.body.customTarget)
+            : previous.customTarget ?? null;
+
+        if (req.body.customTarget !== undefined && (customTarget === null || customTarget <= 0)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ message: 'Meta personalizada inválida' });
+        }
+
+        const recommendedTarget = computeRecommendedWater(metrics.height, metrics.weight);
+
+        let resolvedTarget = recommendedTarget;
+        if (useRecommendedTarget) {
+          resolvedTarget = requestedTarget && requestedTarget > 0 ? requestedTarget : recommendedTarget;
+          customTarget = null;
+        } else {
+          if (requestedTarget && requestedTarget > 0) {
+            customTarget = requestedTarget;
+          }
+
+          if (customTarget === null || customTarget <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Debes indicar una meta personalizada válida' });
+          }
+          resolvedTarget = customTarget;
+        }
+
+        const reminderInterval =
+          req.body.reminderInterval !== undefined
+            ? toIntegerOrNull(req.body.reminderInterval)
+            : previous.reminderInterval ?? habit.reminderInterval ?? null;
+
+        if (req.body.reminderInterval !== undefined && (!reminderInterval || reminderInterval <= 0)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ message: 'Intervalo de recordatorio inválido' });
+        }
+
+        const reminderIntervalValue = reminderInterval ?? fallbackReminder;
+
+        await client.query(
+          `UPDATE user_habits
+           SET target_value = $1,
+               reminder_interval_minutes = $2,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3`,
+          [resolvedTarget, reminderIntervalValue, habit.id]
+        );
+
+        await client.query(
+          `INSERT INTO water_settings (user_habit_id, use_recommended_target, recommended_target_ml, custom_target_ml, reminder_interval_minutes)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (user_habit_id)
+           DO UPDATE SET
+             use_recommended_target = EXCLUDED.use_recommended_target,
+             recommended_target_ml = EXCLUDED.recommended_target_ml,
+             custom_target_ml = EXCLUDED.custom_target_ml,
+             reminder_interval_minutes = EXCLUDED.reminder_interval_minutes,
+             last_recalculated_at = CURRENT_TIMESTAMP`,
+          [habit.id, useRecommendedTarget, recommendedTarget, customTarget, reminderIntervalValue]
+        );
+
+        responsePayload = {
+          type: 'water',
+          targetValue: resolvedTarget,
+          recommendedTarget,
+          customTarget,
+          useRecommendedTarget,
+          reminderInterval: reminderIntervalValue,
+        };
+      } else if (habit.slug === 'sleep') {
+        const previous = await client.query(
+          `SELECT bed_time AS "bedTime",
+                  wake_time AS "wakeTime",
+                  reminder_enabled AS "reminderEnabled",
+                  reminder_advance_minutes AS "reminderAdvance"
+           FROM sleep_schedules
+           WHERE user_habit_id = $1`,
+          [habit.id]
+        );
+
+        const previousSettings = previous.rows[0] ?? {
+          bedTime: '22:30:00',
+          wakeTime: '06:30:00',
+          reminderEnabled: true,
+          reminderAdvance: 30,
+        };
+
+        const existingTarget =
+          habit.targetValue !== undefined && habit.targetValue !== null
+            ? Number(habit.targetValue)
+            : null;
+
+        const isValidTime = (value) => typeof value === 'string' && /^\d{2}:\d{2}$/.test(value);
+        const formatTime = (value) => (value.length === 5 ? `${value}:00` : value);
+
+        let bedTime = previousSettings.bedTime;
+        if (req.body.bedTime !== undefined) {
+          if (!isValidTime(req.body.bedTime)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Hora de dormir inválida' });
+          }
+          bedTime = formatTime(req.body.bedTime);
+        }
+
+        let wakeTime = previousSettings.wakeTime;
+        if (req.body.wakeTime !== undefined) {
+          if (!isValidTime(req.body.wakeTime)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Hora de despertar inválida' });
+          }
+          wakeTime = formatTime(req.body.wakeTime);
+        }
+
+        const reminderEnabled =
+          req.body.reminderEnabled !== undefined
+            ? Boolean(req.body.reminderEnabled)
+            : Boolean(previousSettings.reminderEnabled);
+
+        const reminderAdvance =
+          req.body.reminderAdvance !== undefined
+            ? toIntegerOrNull(req.body.reminderAdvance)
+            : toIntegerOrNull(previousSettings.reminderAdvance) ?? 30;
+
+        if (req.body.reminderAdvance !== undefined && (reminderAdvance === null || reminderAdvance < 0)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ message: 'Anticipación de recordatorio inválida' });
+        }
+
+        const targetValue =
+          req.body.targetValue !== undefined
+            ? toNumberOrNull(req.body.targetValue)
+            : existingTarget;
+
+        if (req.body.targetValue !== undefined && (targetValue === null || targetValue <= 0)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ message: 'Meta de sueño inválida' });
+        }
+
+        if (targetValue !== null && targetValue > 0) {
+          await client.query(
+            `UPDATE user_habits
+             SET target_value = $1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [targetValue, habit.id]
+          );
+        }
+
+        await client.query(
+          `INSERT INTO sleep_schedules (user_habit_id, bed_time, wake_time, reminder_enabled, reminder_advance_minutes)
+           VALUES ($1, $2::time, $3::time, $4, $5)
+           ON CONFLICT (user_habit_id)
+           DO UPDATE SET
+             bed_time = EXCLUDED.bed_time,
+             wake_time = EXCLUDED.wake_time,
+             reminder_enabled = EXCLUDED.reminder_enabled,
+             reminder_advance_minutes = EXCLUDED.reminder_advance_minutes`,
+          [habit.id, bedTime, wakeTime, reminderEnabled, reminderAdvance ?? 30]
+        );
+
+        responsePayload = {
+          type: 'sleep',
+          bedTime: bedTime.slice(0, 5),
+          wakeTime: wakeTime.slice(0, 5),
+          reminderEnabled,
+          reminderAdvance: reminderAdvance ?? 30,
+          targetValue: targetValue ?? undefined,
+        };
+      } else if (habit.slug === 'exercise') {
+        const previous = await client.query(
+          `SELECT reminder_enabled AS "reminderEnabled",
+                  reminder_time AS "reminderTime",
+                  daily_goal_minutes AS "dailyGoal"
+           FROM exercise_preferences
+           WHERE user_habit_id = $1`,
+          [habit.id]
+        );
+
+        const previousSettings = previous.rows[0] ?? {
+          reminderEnabled: true,
+          reminderTime: '18:00:00',
+          dailyGoal: 30,
+        };
+
+        const existingDailyGoal =
+          toIntegerOrNull(previousSettings.dailyGoal) ??
+          toIntegerOrNull(habit.targetValue) ??
+          30;
+
+        const isValidTime = (value) => typeof value === 'string' && /^\d{2}:\d{2}$/.test(value);
+        const formatTime = (value) => (value.length === 5 ? `${value}:00` : value);
+
+        const reminderEnabled =
+          req.body.reminderEnabled !== undefined
+            ? Boolean(req.body.reminderEnabled)
+            : Boolean(previousSettings.reminderEnabled);
+
+        let reminderTime = previousSettings.reminderTime;
+        if (req.body.reminderTime !== undefined) {
+          if (!isValidTime(req.body.reminderTime)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Hora de recordatorio inválida' });
+          }
+          reminderTime = formatTime(req.body.reminderTime);
+        }
+
+        const dailyGoalMinutes =
+          req.body.dailyGoalMinutes !== undefined
+            ? toIntegerOrNull(req.body.dailyGoalMinutes)
+            : existingDailyGoal;
+
+        if (req.body.dailyGoalMinutes !== undefined && (!dailyGoalMinutes || dailyGoalMinutes <= 0)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ message: 'Meta de ejercicio inválida' });
+        }
+
+        await client.query(
+          `UPDATE user_habits
+           SET target_value = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [dailyGoalMinutes, habit.id]
+        );
+
+        await client.query(
+          `INSERT INTO exercise_preferences (user_habit_id, reminder_enabled, reminder_time, daily_goal_minutes)
+           VALUES ($1, $2, $3::time, $4)
+           ON CONFLICT (user_habit_id)
+           DO UPDATE SET
+             reminder_enabled = EXCLUDED.reminder_enabled,
+             reminder_time = EXCLUDED.reminder_time,
+             daily_goal_minutes = EXCLUDED.daily_goal_minutes`,
+          [habit.id, reminderEnabled, reminderTime, dailyGoalMinutes]
+        );
+
+        responsePayload = {
+          type: 'exercise',
+          reminderEnabled,
+          reminderTime: reminderTime.slice(0, 5),
+          dailyGoalMinutes,
+        };
+      } else if (habit.slug === 'nutrition') {
+        const remindersEnabled =
+          req.body.remindersEnabled !== undefined
+            ? Boolean(req.body.remindersEnabled)
+            : true;
+
+        const meals = Array.isArray(req.body.meals) ? req.body.meals : [];
+
+        if (!meals.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ message: 'Debes enviar al menos una comida para actualizar' });
+        }
+
+        const isValidTime = (value) => typeof value === 'string' && /^\d{2}:\d{2}$/.test(value);
+        const formatTime = (value) => (value.length === 5 ? `${value}:00` : value);
+
+        let enabledMeals = 0;
+        await client.query('DELETE FROM nutrition_meals WHERE user_habit_id = $1', [habit.id]);
+
+        for (const meal of meals) {
+          if (!meal || typeof meal !== 'object') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Formato de comida inválido' });
+          }
+
+          const code = meal.id ?? meal.code;
+          const label = meal.label ?? meal.name;
+          const time = meal.time ?? meal.localTime;
+          const enabled = meal.enabled !== undefined ? Boolean(meal.enabled) : true;
+
+          if (!code || !label || !isValidTime(time)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Datos de comida incompletos' });
+          }
+
+          if (enabled) {
+            enabledMeals += 1;
+          }
+
+          await client.query(
+            `INSERT INTO nutrition_meals (user_habit_id, meal_code, label, scheduled_time, enabled, reminder_enabled)
+             VALUES ($1, $2, $3, $4::time, $5, $6)
+             ON CONFLICT (user_habit_id, meal_code)
+             DO UPDATE SET
+               label = EXCLUDED.label,
+               scheduled_time = EXCLUDED.scheduled_time,
+               enabled = EXCLUDED.enabled,
+               reminder_enabled = EXCLUDED.reminder_enabled`,
+            [habit.id, code, label, formatTime(time), enabled, remindersEnabled]
+          );
+        }
+
+        const fallbackTarget = (toIntegerOrNull(habit.targetValue) ?? meals.length) || 3;
+        const targetValue = enabledMeals > 0 ? enabledMeals : fallbackTarget;
+
+        await client.query(
+          `UPDATE user_habits
+           SET target_value = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [targetValue, habit.id]
+        );
+
+        responsePayload = {
+          type: 'nutrition',
+          remindersEnabled,
+          meals: meals.map((meal) => ({
+            id: meal.id ?? meal.code,
+            label: meal.label ?? meal.name,
+            time: (meal.time ?? meal.localTime)?.slice(0, 5),
+            enabled: meal.enabled !== undefined ? Boolean(meal.enabled) : true,
+          })),
+          targetValue,
+        };
+      } else {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'Tipo de hábito no soportado' });
+      }
+
+      await client.query('COMMIT');
+
+      res.json({ habitId: habit.id, settings: responsePayload });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error al actualizar ajustes de hábito:', error);
+      res.status(500).json({ message: 'No se pudieron actualizar los ajustes' });
+    } finally {
+      client.release();
+    }
   })
 );
 

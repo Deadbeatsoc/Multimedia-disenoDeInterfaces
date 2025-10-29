@@ -85,7 +85,7 @@ export default function Dashboard() {
 
     try {
       setPendingHabitId(habit.id);
-      logHabitEntry(habit.slug, config.amount);
+      await logHabitEntry(habit.slug, config.amount);
       await refresh();
       Alert.alert('¡Listo!', `${config.label} registrado correctamente.`);
     } catch (error) {
@@ -107,7 +107,7 @@ export default function Dashboard() {
 
     try {
       setIsMarkingReminder(true);
-      markNotificationAsRead(reminder.id);
+      await markNotificationAsRead(reminder.id);
       await refresh();
     } catch (error) {
       Alert.alert(

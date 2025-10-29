@@ -66,14 +66,15 @@ export default function LoginScreen() {
     setStep(2);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canSubmit) {
       setError('Verifica tus datos antes de continuar.');
       return;
     }
 
     try {
-      signIn({
+      setError(null);
+      await signIn({
         username: username.trim(),
         email: email.trim(),
         password,
@@ -96,14 +97,15 @@ export default function LoginScreen() {
     [email, password]
   );
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!canLogin) {
       setError('Ingresa tu correo y contraseña para continuar.');
       return;
     }
 
     try {
-      authenticate({ email: email.trim(), password });
+      setError(null);
+      await authenticate({ email: email.trim(), password });
       router.replace('/(tabs)');
     } catch (err) {
       setError(
