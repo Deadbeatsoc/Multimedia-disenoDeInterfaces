@@ -89,44 +89,28 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.post(
-  '/api/auth/register',
-  asyncHandler(async (req, res) => {
-    const { name, email, password } = req.body ?? {};
+app.post('/api/auth/register', asyncHandler(async (req, res) => {
+  const { name, email, password, height, weight, age } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios' });
-    }
+  if (!name || !email || !password || !height || !weight || !age) {
+    return res.status(400).json({ message: 'Todos los campos son obligatorios' });
+  }
 
-    const normalizedEmail = String(email).trim().toLowerCase();
+  const passwordHash = await bcrypt.hash(password, 10);
 
-    const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
-    if (existing.length) {
-      return res.status(409).json({ message: 'Ya existe un usuario con ese correo' });
-    }
+  const result = await query(
+    `INSERT INTO users (username, email, password_hash, height_cm, weight_kg, age)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, username AS name, email, height_cm AS height, weight_kg AS weight, age, created_at AS "createdAt"`,
+    [name, email, passwordHash, height, weight, age]
+  );
 
-    const passwordHash = await bcrypt.hash(String(password), 10);
+  const [user] = result;
+  const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
 
-    const inserted = await query(
-      `INSERT INTO users (name, email, password_hash)
-       VALUES ($1, $2, $3)
-       RETURNING id, name, email, created_at AS "createdAt"`,
-      [String(name).trim(), normalizedEmail, passwordHash]
-    );
+  res.status(201).json({ token, user });
+}));
 
-    const [user] = inserted;
-    if (!user) {
-      return res.status(500).json({ message: 'No se pudo crear el usuario' });
-    }
-
-    const token = createToken(user.id);
-
-    res.status(201).json({
-      token,
-      user: toPublicUser(user),
-    });
-  })
-);
 
 app.post(
   '/api/auth/login',

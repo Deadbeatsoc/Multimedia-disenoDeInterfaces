@@ -576,6 +576,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       const normalizedEmail = email.trim().toLowerCase();
 
       try {
+        console.log("➡️ Intentando registrar usuario en:", `${API_URL}/auth/register`);
         const response = await fetch(`${API_URL}/auth/register`, {
           method: 'POST',
           headers: {
