@@ -3,10 +3,13 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { HabitLog, HabitSlug, HabitSummary, NotificationItem, ReminderItem } from '@/types/api';
 import {
   DailySnapshot,
@@ -55,11 +58,13 @@ interface SignInCredentials {
 
 interface AppContextValue {
   user: UserProfile | null;
+  token: string | null;
   dashboard: DashboardState;
   isLoading: boolean;
-  signIn: (payload: SignInPayload) => void;
-  authenticate: (credentials: SignInCredentials) => void;
-  signOut: () => void;
+  signIn: (payload: SignInPayload) => Promise<void>;
+  authenticate: (credentials: SignInCredentials) => Promise<void>;
+  signOut: () => Promise<void>;
+  loadSession: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => void;
   logHabitEntry: (slug: HabitSlug, value: number, notes?: string) => HabitLog;
   getHabitHistory: (slug: HabitSlug) => HabitLog[];
@@ -112,6 +117,103 @@ const defaultMeals: NutritionMealConfig[] = [
   { id: 'lunch', label: 'Almuerzo', time: '13:00', enabled: true },
   { id: 'dinner', label: 'Cena', time: '20:00', enabled: true },
 ];
+
+const AUTH_TOKEN_KEY = 'auth_token';
+const AUTH_USER_KEY = 'auth_user';
+const DEFAULT_WATER_TARGET = 2000;
+
+const resolveApiUrl = () => {
+  const extra =
+    Constants?.expoConfig?.extra ??
+    ((Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra ?? {});
+  return (extra?.apiUrl as string | undefined) ?? process.env.EXPO_PUBLIC_API_URL ?? '';
+};
+
+const API_URL = resolveApiUrl();
+
+const normalizeNumber = (value: unknown, fallback: number) => {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const DEFAULT_PROFILE_METRICS: Pick<UserProfile, 'height' | 'weight' | 'age'> = {
+  height: 170,
+  weight: 65,
+  age: 28,
+};
+
+const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): UserProfile => {
+  const emailCandidate =
+    (typeof apiUser?.email === 'string' && apiUser.email) ?? fallback.email ?? '';
+  const usernameCandidate =
+    (typeof apiUser?.username === 'string' && apiUser.username) ||
+    (typeof apiUser?.name === 'string' && apiUser.name) ||
+    fallback.username ||
+    emailCandidate ||
+    'Usuario';
+
+  return {
+    username: usernameCandidate,
+    email: emailCandidate,
+    password: fallback.password ?? '',
+    height: normalizeNumber(
+      apiUser?.height,
+      fallback.height ?? DEFAULT_PROFILE_METRICS.height
+    ),
+    weight: normalizeNumber(
+      apiUser?.weight,
+      fallback.weight ?? DEFAULT_PROFILE_METRICS.weight
+    ),
+    age: normalizeNumber(apiUser?.age, fallback.age ?? DEFAULT_PROFILE_METRICS.age),
+  };
+};
+
+const buildHabitStates = (
+  habitSettings: HabitSettingsMap
+): Record<HabitSlug, HabitState> => ({
+  water: {
+    summary: createHabitSummary('water', resolveTargetFromSettings('water', habitSettings)),
+    history: [],
+    settings: habitSettings.water,
+  },
+  sleep: {
+    summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', habitSettings)),
+    history: [],
+    settings: habitSettings.sleep,
+  },
+  exercise: {
+    summary: createHabitSummary('exercise', resolveTargetFromSettings('exercise', habitSettings)),
+    history: [],
+    settings: habitSettings.exercise,
+  },
+  nutrition: {
+    summary: createHabitSummary('nutrition', resolveTargetFromSettings('nutrition', habitSettings)),
+    history: [],
+    settings: habitSettings.nutrition,
+  },
+});
+
+const parseErrorResponse = async (response: Response) => {
+  const fallback = 'No se pudo completar la solicitud. Inténtalo de nuevo más tarde.';
+  const text = await response.text();
+  if (!text) {
+    return fallback;
+  }
+
+  try {
+    const data = JSON.parse(text);
+    if (typeof data?.message === 'string') {
+      return data.message;
+    }
+    if (typeof data?.error === 'string') {
+      return data.error;
+    }
+  } catch {
+    return text;
+  }
+
+  return fallback;
+};
 
 const formatProgressText = (value: number, target: number, unit: string) => {
   if (unit === 'ml') {
@@ -196,40 +298,13 @@ const resolveTargetFromSettings = (slug: HabitSlug, settings: HabitSettingsMap):
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function AppProvider({ children }: PropsWithChildren) {
+  const initialSettingsRef = useRef(createDefaultSettings(DEFAULT_WATER_TARGET));
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [registeredUsers, setRegisteredUsers] = useState<Record<string, UserProfile>>({});
-  const [settings, setSettings] = useState<HabitSettingsMap>(() => createDefaultSettings(2000));
-  const [habits, setHabits] = useState<Record<HabitSlug, HabitState>>(() => {
-    const initialSettings = createDefaultSettings(2000);
-    return {
-      water: {
-        summary: createHabitSummary('water', resolveTargetFromSettings('water', initialSettings)),
-        history: [],
-        settings: initialSettings.water,
-      },
-      sleep: {
-        summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', initialSettings)),
-        history: [],
-        settings: initialSettings.sleep,
-      },
-      exercise: {
-        summary: createHabitSummary(
-          'exercise',
-          resolveTargetFromSettings('exercise', initialSettings)
-        ),
-        history: [],
-        settings: initialSettings.exercise,
-      },
-      nutrition: {
-        summary: createHabitSummary(
-          'nutrition',
-          resolveTargetFromSettings('nutrition', initialSettings)
-        ),
-        history: [],
-        settings: initialSettings.nutrition,
-      },
-    };
-  });
+  const [token, setToken] = useState<string | null>(null);
+  const [settings, setSettings] = useState<HabitSettingsMap>(initialSettingsRef.current);
+  const [habits, setHabits] = useState<Record<HabitSlug, HabitState>>(() =>
+    buildHabitStates(initialSettingsRef.current)
+  );
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [dailySnapshots, setDailySnapshots] = useState<Record<string, DailySnapshot>>({});
@@ -340,6 +415,59 @@ export function AppProvider({ children }: PropsWithChildren) {
     []
   );
 
+  const resetAppState = useCallback(() => {
+    const baseSettings = createDefaultSettings(DEFAULT_WATER_TARGET);
+    const baseHabits = buildHabitStates(baseSettings);
+
+    nextLogId.current = 1;
+    nextNotificationId.current = 1;
+    setUser(null);
+    setSettings(baseSettings);
+    setHabits(baseHabits);
+    setDailySnapshots({});
+    setReminders([]);
+    setNotifications([]);
+  }, []);
+
+  const initializeUserSession = useCallback(
+    (
+      profile: UserProfile,
+      welcome?: { welcomeTitle?: string; welcomeMessage?: string }
+    ) => {
+      const recommended = computeRecommendedWater(profile.height, profile.weight);
+      const nextSettings = createDefaultSettings(recommended);
+      const nextHabits = buildHabitStates(nextSettings);
+
+      nextLogId.current = 1;
+      nextNotificationId.current = 1;
+
+      setUser(profile);
+      setSettings(nextSettings);
+      setHabits(nextHabits);
+      setDailySnapshots({});
+      rebuildReminders(nextHabits, nextSettings);
+
+      if (welcome?.welcomeTitle && welcome?.welcomeMessage) {
+        setNotifications([
+          {
+            id: nextNotificationId.current++,
+            habitId: null,
+            title: welcome.welcomeTitle,
+            message: welcome.welcomeMessage,
+            type: 'alert',
+            channel: 'in_app',
+            scheduledFor: null,
+            read: false,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      } else {
+        setNotifications([]);
+      }
+    },
+    [rebuildReminders]
+  );
+
   const logHabitEntry = useCallback<AppContextValue['logHabitEntry']>(
     (slug, value, notes) => {
       const now = new Date();
@@ -443,186 +571,201 @@ export function AppProvider({ children }: PropsWithChildren) {
   );
 
   const signIn = useCallback<AppContextValue['signIn']>(
-    ({ username, email, password, height, weight, age }) => {
-      const normalizedEmail = email.trim().toLowerCase();
-      if (registeredUsers[normalizedEmail]) {
-        throw new Error('Ya existe una cuenta registrada con este correo electrónico.');
-      }
-
+    async ({ username, email, password, height, weight, age }) => {
       setIsLoading(true);
-      const recommended = computeRecommendedWater(height, weight);
-      const nextSettings = createDefaultSettings(recommended);
+      const normalizedEmail = email.trim().toLowerCase();
 
-      const nextHabits: Record<HabitSlug, HabitState> = {
-        water: {
-          summary: createHabitSummary('water', resolveTargetFromSettings('water', nextSettings)),
-          history: [],
-          settings: nextSettings.water,
-        },
-        sleep: {
-          summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', nextSettings)),
-          history: [],
-          settings: nextSettings.sleep,
-        },
-        exercise: {
-          summary: createHabitSummary(
-            'exercise',
-            resolveTargetFromSettings('exercise', nextSettings)
-          ),
-          history: [],
-          settings: nextSettings.exercise,
-        },
-        nutrition: {
-          summary: createHabitSummary(
-            'nutrition',
-            resolveTargetFromSettings('nutrition', nextSettings)
-          ),
-          history: [],
-          settings: nextSettings.nutrition,
-        },
-      };
+      try {
+        const response = await fetch(`${API_URL}/auth/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: username.trim(),
+            email: normalizedEmail,
+            password,
+            height,
+            weight,
+            age,
+          }),
+        });
 
-      setSettings(nextSettings);
-      setHabits(nextHabits);
-      setDailySnapshots({});
-      rebuildReminders(nextHabits, nextSettings);
-      setNotifications([
-        {
-          id: nextNotificationId.current++,
-          habitId: null,
-          title: '👋 ¡Bienvenido!',
-          message: 'Configura tus hábitos para recibir recordatorios personalizados.',
-          type: 'alert',
-          channel: 'in_app',
-          scheduledFor: null,
-          read: false,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-      const profile: UserProfile = {
-        username,
-        email,
-        password,
-        height,
-        weight,
-        age,
-      };
-      setUser(profile);
-      setRegisteredUsers((prev) => ({
-        ...prev,
-        [normalizedEmail]: profile,
-      }));
-      setIsLoading(false);
+        if (!response.ok) {
+          const message = await parseErrorResponse(response);
+          throw new Error(message);
+        }
+
+        const data = await response.json();
+        const authToken: string | undefined =
+          data?.token ?? data?.accessToken ?? data?.jwt;
+
+        if (!authToken) {
+          throw new Error('No se recibió el token de autenticación.');
+        }
+
+        await AsyncStorage.setItem(AUTH_TOKEN_KEY, authToken);
+        setToken(authToken);
+
+        const profile = buildUserProfile(data?.user, {
+          username: username.trim(),
+          email: normalizedEmail,
+          password,
+          height,
+          weight,
+          age,
+        });
+
+        initializeUserSession(profile, {
+          welcomeTitle: '👋 ¡Bienvenido!',
+          welcomeMessage:
+            'Configura tus hábitos para recibir recordatorios personalizados.',
+        });
+        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
+      } catch (error) {
+        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        setToken(null);
+        throw error instanceof Error
+          ? error
+          : new Error('No pudimos crear tu perfil. Intenta nuevamente.');
+      } finally {
+        setIsLoading(false);
+      }
     },
-    [rebuildReminders, registeredUsers]
+    [initializeUserSession]
   );
 
   const authenticate = useCallback<AppContextValue['authenticate']>(
-    ({ email, password }) => {
+    async ({ email, password }) => {
       setIsLoading(true);
       const normalizedEmail = email.trim().toLowerCase();
-      const record = registeredUsers[normalizedEmail];
 
-      if (!record || record.password !== password) {
+      try {
+        const response = await fetch(`${API_URL}/auth/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: normalizedEmail,
+            password,
+          }),
+        });
+
+        if (!response.ok) {
+          const message = await parseErrorResponse(response);
+          throw new Error(message);
+        }
+
+        const data = await response.json();
+        const authToken: string | undefined =
+          data?.token ?? data?.accessToken ?? data?.jwt;
+
+        if (!authToken) {
+          throw new Error('No se recibió el token de autenticación.');
+        }
+
+        await AsyncStorage.setItem(AUTH_TOKEN_KEY, authToken);
+        setToken(authToken);
+
+        const profile = buildUserProfile(data?.user, {
+          email: normalizedEmail,
+          password,
+        });
+
+        initializeUserSession(profile, {
+          welcomeTitle: '👋 ¡Bienvenido de nuevo!',
+          welcomeMessage: 'Revisa tus hábitos para continuar con tu progreso.',
+        });
+        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
+      } catch (error) {
+        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        setToken(null);
+        throw error instanceof Error
+          ? error
+          : new Error('No pudimos validar tus credenciales. Intenta nuevamente.');
+      } finally {
         setIsLoading(false);
-        throw new Error('Correo o contraseña incorrectos.');
       }
-
-      const recommended = computeRecommendedWater(record.height, record.weight);
-      const nextSettings = createDefaultSettings(recommended);
-
-      const nextHabits: Record<HabitSlug, HabitState> = {
-        water: {
-          summary: createHabitSummary('water', resolveTargetFromSettings('water', nextSettings)),
-          history: [],
-          settings: nextSettings.water,
-        },
-        sleep: {
-          summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', nextSettings)),
-          history: [],
-          settings: nextSettings.sleep,
-        },
-        exercise: {
-          summary: createHabitSummary(
-            'exercise',
-            resolveTargetFromSettings('exercise', nextSettings)
-          ),
-          history: [],
-          settings: nextSettings.exercise,
-        },
-        nutrition: {
-          summary: createHabitSummary(
-            'nutrition',
-            resolveTargetFromSettings('nutrition', nextSettings)
-          ),
-          history: [],
-          settings: nextSettings.nutrition,
-        },
-      };
-
-      setSettings(nextSettings);
-      setHabits(nextHabits);
-      setDailySnapshots({});
-      rebuildReminders(nextHabits, nextSettings);
-      setNotifications([
-        {
-          id: nextNotificationId.current++,
-          habitId: null,
-          title: '👋 ¡Bienvenido de nuevo!',
-          message: 'Revisa tus hábitos para continuar con tu progreso.',
-          type: 'alert',
-          channel: 'in_app',
-          scheduledFor: null,
-          read: false,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-      setUser(record);
-      setIsLoading(false);
     },
-    [rebuildReminders, registeredUsers]
+    [initializeUserSession]
   );
 
-  const signOut = useCallback<AppContextValue['signOut']>(() => {
-    const baseSettings = createDefaultSettings(2000);
-    const baseHabits: Record<HabitSlug, HabitState> = {
-      water: {
-        summary: createHabitSummary('water', resolveTargetFromSettings('water', baseSettings)),
-        history: [],
-        settings: baseSettings.water,
-      },
-      sleep: {
-        summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', baseSettings)),
-        history: [],
-        settings: baseSettings.sleep,
-      },
-      exercise: {
-        summary: createHabitSummary(
-          'exercise',
-          resolveTargetFromSettings('exercise', baseSettings)
-        ),
-        history: [],
-        settings: baseSettings.exercise,
-      },
-      nutrition: {
-        summary: createHabitSummary(
-          'nutrition',
-          resolveTargetFromSettings('nutrition', baseSettings)
-        ),
-        history: [],
-        settings: baseSettings.nutrition,
-      },
-    };
+  const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
+    setIsLoading(true);
+    let storedToken: string | null = null;
+    let forcedSignOut = false;
 
-    setUser(null);
-    setSettings(baseSettings);
-    setHabits(baseHabits);
-    setDailySnapshots({});
-    setReminders([]);
-    setNotifications([]);
-    nextLogId.current = 1;
-    nextNotificationId.current = 1;
-  }, []);
+    try {
+      storedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+      if (!storedToken) {
+        setToken(null);
+        resetAppState();
+        return;
+      }
+
+      setToken(storedToken);
+
+      const response = await fetch(`${API_URL}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${storedToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        const message = await parseErrorResponse(response);
+        if (response.status === 401 || response.status === 403) {
+          forcedSignOut = true;
+          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+          await AsyncStorage.removeItem(AUTH_USER_KEY);
+          setToken(null);
+          resetAppState();
+        }
+        throw new Error(message);
+      }
+
+      const data = await response.json();
+      const profile = buildUserProfile(data?.user ?? data);
+
+      initializeUserSession(profile);
+      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
+    } catch (error) {
+      if (!forcedSignOut && storedToken) {
+        const cachedProfile = await AsyncStorage.getItem(AUTH_USER_KEY);
+        if (cachedProfile) {
+          try {
+            const parsedProfile = JSON.parse(cachedProfile) as UserProfile;
+            initializeUserSession(parsedProfile);
+            return;
+          } catch {
+            await AsyncStorage.removeItem(AUTH_USER_KEY);
+          }
+        }
+      }
+
+      if (error instanceof Error) {
+        console.warn('No se pudo restaurar la sesión:', error.message);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [initializeUserSession, resetAppState]);
+
+  useEffect(() => {
+    loadSession();
+  }, [loadSession]);
+
+  const signOut = useCallback<AppContextValue['signOut']>(async () => {
+    try {
+      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+      await AsyncStorage.removeItem(AUTH_USER_KEY);
+    } finally {
+      setToken(null);
+      resetAppState();
+    }
+  }, [resetAppState]);
 
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     (updates) => {
@@ -644,16 +787,6 @@ export function AppProvider({ children }: PropsWithChildren) {
             },
           });
         }
-        const previousKey = prev.email.trim().toLowerCase();
-        const nextKey = next.email.trim().toLowerCase();
-        setRegisteredUsers((records) => {
-          const nextRecords = { ...records };
-          if (previousKey && previousKey !== nextKey) {
-            delete nextRecords[previousKey];
-          }
-          nextRecords[nextKey] = next;
-          return nextRecords;
-        });
         return next;
       });
     },
@@ -778,11 +911,13 @@ export function AppProvider({ children }: PropsWithChildren) {
   const value = useMemo<AppContextValue>(
     () => ({
       user,
+      token,
       dashboard,
       isLoading,
       signIn,
       authenticate,
       signOut,
+      loadSession,
       updateProfile,
       logHabitEntry,
       getHabitHistory,
@@ -799,6 +934,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       getHabitHistory,
       isLoading,
       logHabitEntry,
+      loadSession,
       markNotificationAsRead,
       refreshReminders,
       signOut,
@@ -810,6 +946,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       updateProfile,
       updateSleepSettings,
       updateWaterSettings,
+      token,
       user,
     ]
   );
