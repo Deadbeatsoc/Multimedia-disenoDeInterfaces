@@ -21,11 +21,9 @@ DROP TYPE IF EXISTS notification_channel_type;
 DROP TYPE IF EXISTS notification_type_enum;
 DROP TYPE IF EXISTS habit_reminder_frequency_enum;
 DROP TYPE IF EXISTS habit_entry_source_enum;
-DROP TYPE IF EXISTS gender_type_enum;
 
 -- Tipos --------------------------------------------------------------------
 
-CREATE TYPE gender_type_enum AS ENUM ('female', 'male', 'non_binary', 'prefer_not_to_say');
 CREATE TYPE habit_entry_source_enum AS ENUM ('manual', 'auto', 'imported');
 CREATE TYPE habit_reminder_frequency_enum AS ENUM ('daily', 'weekdays', 'weekends', 'custom');
 CREATE TYPE notification_type_enum AS ENUM ('reminder', 'achievement', 'alert');
@@ -35,16 +33,10 @@ CREATE TYPE notification_channel_type AS ENUM ('in_app', 'push', 'email', 'sms')
 
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  username VARCHAR(60) NOT NULL UNIQUE,
-  email VARCHAR(150) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
-  height_cm SMALLINT NOT NULL,
-  weight_kg NUMERIC(5, 2) NOT NULL,
-  age SMALLINT NOT NULL,
-  gender gender_type_enum DEFAULT 'prefer_not_to_say',
-  timezone VARCHAR(100) DEFAULT 'America/Bogota',
-  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE user_metrics (
@@ -175,8 +167,12 @@ CREATE TABLE notification_channels (
 
 -- Datos de ejemplo ---------------------------------------------------------
 
-INSERT INTO users (username, email, password_hash, height_cm, weight_kg, age, gender)
-VALUES ('maria', 'maria@example.com', '$2y$10$abcdefghijklmnopqrstuvwxyz0123456789abcdefghi', 165, 64.5, 29, 'female');
+INSERT INTO users (name, email, password_hash)
+VALUES (
+  'María Gómez',
+  'maria@example.com',
+  '$2a$10$CwTycUXWue0Thq9StjUM0uJ8Gf3.cVQ/6Z3Y0JVpaz6RtZpmjH8u'
+);
 
 INSERT INTO habit_types (slug, name, icon, color, default_unit, default_target_value)
 VALUES

@@ -85,7 +85,7 @@ Necesitarás los siguientes datos para configurar el backend:
 ### 1.6 Esquema incluido
 
 El script [`database/schema.sql`](database/schema.sql) crea tablas normalizadas que cubren los flujos de la aplicación:
-- `users`: datos de acceso y biometría (usuario, correo, contraseña en hash, altura, peso, edad, huso horario).
+- `users`: credenciales básicas (`name`, `email`, `password_hash`) y la fecha de alta.
 - `user_metrics`: histórico opcional de medidas, metas recomendadas y notas de seguimiento.
 - `habit_types`: catálogo de hábitos soportados (agua, sueño, ejercicio, alimentación).
 - `user_habits`: instancia de cada hábito que configura una persona, con metas, recordatorios y metadatos.
@@ -113,6 +113,7 @@ El script [`database/schema.sql`](database/schema.sql) crea tablas normalizadas 
    DB_PASSWORD=tu_contraseña_segura
    DB_NAME=habit_tracker
    DB_SSL=false
+   JWT_SECRET=clave_ultra_secreta
    ```
 
    > Si tu base está en un servicio administrado (Render, Supabase, Railway, etc.) sustituye los valores por los que proporcione el proveedor y ajusta `DB_SSL=true` cuando sea necesario.
@@ -136,12 +137,71 @@ El script [`database/schema.sql`](database/schema.sql) crea tablas normalizadas 
 
 5. El servicio queda escuchando por defecto en `http://localhost:3000` y expone los siguientes endpoints principales:
 
+   - `POST /api/auth/register` – crea un usuario nuevo con contraseña cifrada (bcryptjs).
+   - `POST /api/auth/login` – valida credenciales y entrega un token JWT.
+   - `GET /api/auth/me` – devuelve los datos del usuario autenticado.
    - `GET /api/health` – comprobación del estado del servidor.
-   - `GET /api/dashboard` – resumen diario de hábitos, progreso y notificaciones.
-   - `GET /api/habits/:habitId/logs` – historial de registros por hábito.
-   - `POST /api/habits/:habitId/logs` – crear un nuevo registro de progreso.
-   - `GET /api/notifications` – listar notificaciones (pendientes o históricas).
-   - `PATCH /api/notifications/:id/read` – marcar notificaciones como leídas.
+   - `GET /api/dashboard` – resumen diario de hábitos, progreso y notificaciones (requiere token).
+   - `GET /api/habits/:habitId/logs` – historial de registros por hábito (requiere token).
+   - `POST /api/habits/:habitId/logs` – crear un nuevo registro de progreso (requiere token).
+   - `GET /api/notifications` – listar notificaciones (pendientes o históricas, requiere token).
+   - `PATCH /api/notifications/:id/read` – marcar notificaciones como leídas (requiere token).
+
+### 2.1 Autenticación y uso del token JWT
+
+1. **Registro**. Envía nombre, correo y contraseña a `/api/auth/register`. El backend devuelve el token listo para guardarse en el cliente.
+
+   ```bash
+   curl -X POST http://localhost:3000/api/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{"name":"María Gómez","email":"maria@example.com","password":"demo123"}'
+   ```
+
+   Respuesta esperada:
+
+   ```json
+   {
+     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "user": {
+       "id": 1,
+       "name": "María Gómez",
+       "email": "maria@example.com",
+       "createdAt": "2024-01-01T12:00:00.000Z"
+     }
+   }
+   ```
+
+2. **Inicio de sesión**. Repite el flujo con `/api/auth/login` para usuarios existentes.
+
+   ```bash
+   curl -X POST http://localhost:3000/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"maria@example.com","password":"demo123"}'
+   ```
+
+3. **Guardar y reutilizar el token**. Una vez que la app guarda el token, todas las peticiones protegidas deben incluirlo en el encabezado `Authorization`.
+
+   ```bash
+   curl http://localhost:3000/api/dashboard \
+     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   ```
+
+4. **Ejemplo con `fetch` en la app Expo**. Después de un login exitoso guarda el token (por ejemplo, en contexto o SecureStore) y úsalo en las llamadas posteriores.
+
+   ```ts
+   const token = await authenticateUser(email, password);
+
+   const response = await fetch(`${apiUrl}/habits/${habitId}/logs`, {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/json',
+       Authorization: `Bearer ${token}`,
+     },
+     body: JSON.stringify({ value: 250, notes: 'Vaso de agua' }),
+   });
+   ```
+
+   Si el token falta o es inválido el servidor responderá con `401 Unauthorized`. Al incluirlo correctamente cada usuario verá únicamente sus hábitos, registros y notificaciones.
 
 ## 3. Conectar la app Expo con la API
 
@@ -184,24 +244,6 @@ Con esta configuración tendrás pgAdmin 4 gestionando la base de datos PostgreS
 ## 4. Mapa de funcionalidades
 
 La siguiente tabla relaciona los requisitos planteados para la app de hábitos saludables con las pantallas y archivos más relevantes dentro del proyecto. Úsala como guía rápida para validar que cada flujo está implementado tanto en la interfaz como en la lógica de negocio.
-
-| Requisito | Implementación principal |
-| --- | --- |
-| Registro en dos pasos solicitando usuario, correo, contraseña, altura, peso y edad | [`app/index.tsx`](app/index.tsx) maneja el formulario, validaciones y el alta en el contexto global |
-| Recomendación de agua según altura y peso con posibilidad de meta personalizada | Lógica en [`context/AppContext.tsx`](context/AppContext.tsx) (`computeRecommendedWater`, `updateWaterSettings`) y controles en [`app/(tabs)/habits.tsx`](app/(tabs)/habits.tsx) |
-| Rutinas de sueño con recordatorios antes de dormir | Configuración editable en [`app/(tabs)/habits.tsx`](app/(tabs)/habits.tsx) y persistencia en el contexto (`updateSleepSettings`) |
-| Recordatorios de comidas configurables por horario | Sección de alimentación en [`app/(tabs)/habits.tsx`](app/(tabs)/habits.tsx) y manejo de recordatorios en `updateNutritionSettings` |
-| Registro y recordatorios de ejercicio diario | Componente `HabitTracker` en [`components/HabitTracker.tsx`](components/HabitTracker.tsx) y actualizaciones vía `updateExerciseSettings` |
-| Panel diario con progreso, acciones rápidas y recordatorios | Vista principal [`app/(tabs)/index.tsx`](app/(tabs)/index.tsx) apoyada por el hook [`hooks/useDashboardData.ts`](hooks/useDashboardData.ts) |
-| Estadísticas históricas con gráficos y logros | Pantalla [`app/(tabs)/stats.tsx`](app/(tabs)/stats.tsx) que utiliza el componente [`components/ProgressChart.tsx`](components/ProgressChart.tsx) |
-| Perfil editable para actualizar datos y recalcular recomendaciones | Pantalla [`app/(tabs)/profile.tsx`](app/(tabs)/profile.tsx) y método `updateProfile` en el contexto |
-| Persistencia y API REST | Esquema SQL en [`database/schema.sql`](database/schema.sql) y servidor Express en [`server/index.js`](server/index.js) |
-
-## 4. Mapa de funcionalidades
-
-La siguiente tabla relaciona los requisitos planteados para la app de hábitos saludables con las pantallas y archivos más
-relevantes dentro del proyecto. Úsala como guía rápida para validar que cada flujo está implementado tanto en la interfaz como en
-la lógica de negocio.
 
 | Requisito | Implementación principal |
 | --- | --- |
