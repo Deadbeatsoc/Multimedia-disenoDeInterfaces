@@ -244,95 +244,64 @@ VALUES
 
 -- Registros de hábitos recientes
 WITH water AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'water'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'water'
 ), sleep AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'sleep'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'sleep'
 ), exercise AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'exercise'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'exercise'
 ), nutrition AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'nutrition'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'nutrition'
 )
 INSERT INTO habit_entries (user_habit_id, entry_date, logged_at, value, notes, source)
-SELECT water.id, CURRENT_DATE, (CURRENT_DATE::timestamp + TIME '08:30:00'), 250, 'Vaso de agua al despertar', 'manual'::habit_entry_source_enum FROM water
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '08:30:00', 250, 'Vaso de agua al despertar', 'manual' FROM water
 UNION ALL
-SELECT water.id, CURRENT_DATE, (CURRENT_DATE::timestamp + TIME '12:15:00'), 500, 'Botella durante el almuerzo', 'manual'::habit_entry_source_enum FROM water
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '12:15:00', 500, 'Botella durante el almuerzo', 'manual' FROM water
 UNION ALL
-SELECT water.id, CURRENT_DATE, (CURRENT_DATE::timestamp + TIME '15:45:00'), 750, 'Botella grande después de entrenar', 'manual'::habit_entry_source_enum FROM water
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '15:45:00', 750, 'Botella grande después de entrenar', 'manual' FROM water
 UNION ALL
-SELECT water.id, CURRENT_DATE, (CURRENT_DATE::timestamp + TIME '18:30:00'), 250, 'Vaso de agua', 'manual'::habit_entry_source_enum FROM water
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '18:30:00', 250, 'Vaso de agua', 'manual' FROM water
 UNION ALL
-SELECT sleep.id, CURRENT_DATE - INTERVAL '1 day', ((CURRENT_DATE - INTERVAL '1 day')::timestamp + TIME '22:30:00'), 8, 'Dormí muy bien', 'manual'::habit_entry_source_enum FROM sleep
+SELECT sleep.id, CURRENT_DATE - INTERVAL '1 day', (CURRENT_DATE - INTERVAL '1 day') + TIME '22:30:00', 8, 'Dormí muy bien', 'manual' FROM sleep
 UNION ALL
-SELECT exercise.id, CURRENT_DATE - INTERVAL '1 day', ((CURRENT_DATE - INTERVAL '1 day')::timestamp + TIME '07:30:00'), 35, 'Rutina de fuerza', 'manual'::habit_entry_source_enum FROM exercise
+SELECT exercise.id, CURRENT_DATE - INTERVAL '1 day', (CURRENT_DATE - INTERVAL '1 day') + TIME '07:30:00', 35, 'Rutina de fuerza', 'manual' FROM exercise
 UNION ALL
-SELECT nutrition.id, CURRENT_DATE - INTERVAL '1 day', ((CURRENT_DATE - INTERVAL '1 day')::timestamp + TIME '13:00:00'), 3, 'Comidas completas y saludables', 'manual'::habit_entry_source_enum FROM nutrition;
+SELECT nutrition.id, CURRENT_DATE - INTERVAL '1 day', (CURRENT_DATE - INTERVAL '1 day') + TIME '13:00:00', 3, 'Comidas completas y saludables', 'manual' FROM nutrition;
 
 -- Recordatorios configurados
 WITH water AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'water'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'water'
 ), sleep AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'sleep'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'sleep'
 ), exercise AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'exercise'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'exercise'
 ), nutrition AS (
-  SELECT uh.id FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'nutrition'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'nutrition'
 )
 INSERT INTO habit_reminders (user_habit_id, reminder_time, day_of_week, frequency, enabled)
-SELECT water.id, TIME '09:00:00', NULL::SMALLINT, 'daily'::habit_reminder_frequency_enum, TRUE FROM water
+SELECT water.id, TIME '09:00:00', NULL, 'daily', TRUE FROM water
 UNION ALL
-SELECT water.id, TIME '15:00:00', NULL::SMALLINT, 'daily'::habit_reminder_frequency_enum, TRUE FROM water
+SELECT water.id, TIME '15:00:00', NULL, 'daily', TRUE FROM water
 UNION ALL
-SELECT sleep.id, TIME '22:00:00', NULL::SMALLINT, 'daily'::habit_reminder_frequency_enum, TRUE FROM sleep
+SELECT sleep.id, TIME '22:00:00', NULL, 'daily', TRUE FROM sleep
 UNION ALL
-SELECT exercise.id, TIME '06:30:00', NULL::SMALLINT, 'weekdays'::habit_reminder_frequency_enum, TRUE FROM exercise
+SELECT exercise.id, TIME '06:30:00', NULL, 'weekdays', TRUE FROM exercise
 UNION ALL
-SELECT nutrition.id, TIME '12:30:00', NULL::SMALLINT, 'daily'::habit_reminder_frequency_enum, TRUE FROM nutrition;
+SELECT nutrition.id, TIME '12:30:00', NULL, 'daily', TRUE FROM nutrition;
 
 -- Notificaciones de ejemplo
 WITH water AS (
-  SELECT uh.id 
-  FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'water'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'water'
 ), exercise AS (
-  SELECT uh.id 
-  FROM user_habits uh 
-  JOIN habit_types ht ON ht.id = uh.habit_type_id 
-  WHERE uh.user_id = 1 AND ht.slug = 'exercise'
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'exercise'
 )
 INSERT INTO notifications (user_id, user_habit_id, title, message, type, channel, scheduled_for)
-SELECT 1, water.id, '💧 ¡Es hora de beber agua!', 
-       'Te quedan 500ml para cumplir tu meta diaria.', 
-       'reminder'::notification_type_enum, 
-       'push'::notification_channel_type, 
-       (CURRENT_DATE::timestamp + TIME '17:00:00') 
-FROM water
+SELECT 1, water.id, '💧 ¡Es hora de beber agua!', 'Te quedan 500ml para cumplir tu meta diaria.', 'reminder', 'push', CURRENT_DATE + TIME '17:00:00' FROM water
 UNION ALL
-SELECT 1, exercise.id, '🔥 ¡Gran trabajo!', 
-       'Completaste tu objetivo de ejercicio ayer.', 
-       'achievement'::notification_type_enum, 
-       'in_app'::notification_channel_type, 
-       NULL 
-FROM exercise
+SELECT 1, exercise.id, '🔥 ¡Gran trabajo!', 'Completaste tu objetivo de ejercicio ayer.', 'achievement', 'in_app', NULL FROM exercise
 UNION ALL
-SELECT 1, NULL, '✨ Racha de Hábitos', 
-       'Llevas 7 días manteniendo tu racha.', 
-       'achievement'::notification_type_enum, 
-       'in_app'::notification_channel_type, 
-       NULL;
+SELECT 1, NULL, '✨ Racha de Hábitos', 'Llevas 7 días manteniendo tu racha.', 'achievement', 'in_app', NULL;
+
+INSERT INTO notification_channels (user_id, channel, address, verified_at)
+VALUES
+  (1, 'push', 'expo-push-token[demo]', CURRENT_TIMESTAMP),
+  (1, 'email', 'maria@example.com', CURRENT_TIMESTAMP);
