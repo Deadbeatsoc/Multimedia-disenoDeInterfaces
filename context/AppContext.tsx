@@ -53,6 +53,7 @@ interface AppContextValue {
   dashboard: DashboardState;
   isLoading: boolean;
   signIn: (payload: SignInPayload) => void;
+  signOut: () => void;
   updateProfile: (updates: Partial<UserProfile>) => void;
   logHabitEntry: (slug: HabitSlug, value: number, notes?: string) => HabitLog;
   getHabitHistory: (slug: HabitSlug) => HabitLog[];
@@ -489,6 +490,47 @@ export function AppProvider({ children }: PropsWithChildren) {
     [rebuildReminders]
   );
 
+  const signOut = useCallback<AppContextValue['signOut']>(() => {
+    const baseSettings = createDefaultSettings(2000);
+    const baseHabits: Record<HabitSlug, HabitState> = {
+      water: {
+        summary: createHabitSummary('water', resolveTargetFromSettings('water', baseSettings)),
+        history: [],
+        settings: baseSettings.water,
+      },
+      sleep: {
+        summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', baseSettings)),
+        history: [],
+        settings: baseSettings.sleep,
+      },
+      exercise: {
+        summary: createHabitSummary(
+          'exercise',
+          resolveTargetFromSettings('exercise', baseSettings)
+        ),
+        history: [],
+        settings: baseSettings.exercise,
+      },
+      nutrition: {
+        summary: createHabitSummary(
+          'nutrition',
+          resolveTargetFromSettings('nutrition', baseSettings)
+        ),
+        history: [],
+        settings: baseSettings.nutrition,
+      },
+    };
+
+    setUser(null);
+    setSettings(baseSettings);
+    setHabits(baseHabits);
+    setDailySnapshots({});
+    setReminders([]);
+    setNotifications([]);
+    nextLogId.current = 1;
+    nextNotificationId.current = 1;
+  }, []);
+
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     (updates) => {
       setUser((prev) => {
@@ -636,6 +678,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       dashboard,
       isLoading,
       signIn,
+      signOut,
       updateProfile,
       logHabitEntry,
       getHabitHistory,
@@ -654,6 +697,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       logHabitEntry,
       markNotificationAsRead,
       refreshReminders,
+      signOut,
       signIn,
       updateExerciseSettings,
       updateMealTime,

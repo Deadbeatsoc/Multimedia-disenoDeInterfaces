@@ -8,14 +8,24 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, Settings, Bell, Target, Palette, Shield, CircleHelp as HelpCircle, Mail } from 'lucide-react-native';
+import {
+  User,
+  Settings,
+  Bell,
+  Target,
+  Palette,
+  Shield,
+  CircleHelp as HelpCircle,
+  Mail,
+  LogOut,
+} from 'lucide-react-native';
 import { ProfileCard } from '@/components/ProfileCard';
 import { SettingsItem } from '@/components/SettingsItem';
 import { colors, spacing } from '@/constants/theme';
 import { useAppContext } from '@/context/AppContext';
 
 export default function Profile() {
-  const { user, updateProfile, dashboard } = useAppContext();
+  const { user, updateProfile, dashboard, signOut } = useAppContext();
   const [form, setForm] = useState({
     username: '',
     email: '',
@@ -206,12 +216,10 @@ export default function Profile() {
           </View>
         </View>
 
-        <View style={styles.dataSection}>
-          <TouchableOpacity style={styles.dataButton}>
-            <Text style={styles.dataButtonText}>Exportar Datos</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.dataButton}>
-            <Text style={styles.dataButtonText}>Sincronizar Dispositivos</Text>
+        <View style={styles.sessionSection}>
+          <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
+            <LogOut size={18} color="#FFFFFF" />
+            <Text style={styles.logoutButtonText}>Cerrar sesión</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -395,27 +403,29 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  dataSection: {
+  sessionSection: {
     padding: spacing.lg,
     paddingTop: 0,
     paddingBottom: spacing.xl,
-    gap: spacing.md,
   },
-  dataButton: {
-    backgroundColor: '#FFFFFF',
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.error.main,
     borderRadius: 12,
     paddingVertical: spacing.md,
-    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  dataButtonText: {
+  logoutButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.gray[700],
+    color: '#FFFFFF',
   },
   emptyState: {
     flex: 1,
