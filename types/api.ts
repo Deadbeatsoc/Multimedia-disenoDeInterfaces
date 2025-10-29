@@ -20,11 +20,13 @@ export interface ReminderItem {
   title: string;
   message: string;
   type: 'reminder' | 'achievement' | 'alert';
+  channel?: 'in_app' | 'push' | 'email';
   scheduledFor: string | null;
   read: boolean;
 }
 
 export interface NotificationItem extends ReminderItem {
+  channel: 'in_app' | 'push' | 'email';
   createdAt: string;
 }
 

@@ -2,57 +2,49 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing } from '@/constants/theme';
 
-interface ProgressChartProps {
-  period: 'week' | 'month' | 'year';
+export interface ProgressChartPoint {
+  label: string;
+  percentage: number;
 }
 
-const mockData = {
-  week: [
-    { day: 'L', percentage: 80 },
-    { day: 'M', percentage: 90 },
-    { day: 'M', percentage: 75 },
-    { day: 'J', percentage: 85 },
-    { day: 'V', percentage: 95 },
-    { day: 'S', percentage: 70 },
-    { day: 'D', percentage: 60 },
-  ],
-  month: [
-    { day: 'S1', percentage: 85 },
-    { day: 'S2', percentage: 78 },
-    { day: 'S3', percentage: 92 },
-    { day: 'S4', percentage: 88 },
-  ],
-  year: [
-    { day: 'E', percentage: 82 },
-    { day: 'F', percentage: 78 },
-    { day: 'M', percentage: 85 },
-    { day: 'A', percentage: 90 },
-    { day: 'M', percentage: 88 },
-    { day: 'J', percentage: 85 },
-  ],
-};
+interface ProgressChartProps {
+  data: ProgressChartPoint[];
+  emptyMessage?: string;
+}
 
-export function ProgressChart({ period }: ProgressChartProps) {
-  const data = mockData[period];
+export function ProgressChart({ data, emptyMessage = 'No hay datos disponibles' }: ProgressChartProps) {
+  if (!data.length) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.emptyMessage}>{emptyMessage}</Text>
+      </View>
+    );
+  }
+
   const maxHeight = 100;
+  const maxValue = Math.max(...data.map((item) => item.percentage), 100);
+  const normalized = data.map((item) => ({
+    ...item,
+    percentage: Math.max(0, Math.min(item.percentage, 100)),
+  }));
 
   return (
     <View style={styles.container}>
       <View style={styles.chart}>
-        {data.map((item, index) => (
-          <View key={index} style={styles.barContainer}>
+        {normalized.map((item, index) => (
+          <View key={`${item.label}-${index}`} style={styles.barContainer}>
             <View style={styles.barColumn}>
               <View
                 style={[
                   styles.bar,
                   {
-                    height: (item.percentage / 100) * maxHeight,
+                    height: (item.percentage / maxValue) * maxHeight,
                     backgroundColor: colors.blue.main,
                   },
                 ]}
               />
             </View>
-            <Text style={styles.barLabel}>{item.day}</Text>
+            <Text style={styles.barLabel}>{item.label}</Text>
             <Text style={styles.barValue}>{item.percentage}%</Text>
           </View>
         ))}
@@ -71,11 +63,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 160,
   },
   chart: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-around',
+    width: '100%',
     height: 140,
   },
   barContainer: {
@@ -104,4 +100,9 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.gray[500],
   },
+  emptyMessage: {
+    fontSize: 14,
+    color: colors.gray[500],
+  },
 });
+
