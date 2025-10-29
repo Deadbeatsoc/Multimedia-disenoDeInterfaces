@@ -58,11 +58,11 @@ app.get(
          COALESCE(uh.custom_name, ht.name) AS name,
          ht.icon,
          ht.color,
-         uh.target_value AS targetValue,
-         uh.target_unit AS targetUnit
+         uh.target_value AS "targetValue",
+         uh.target_unit AS "targetUnit"
        FROM user_habits AS uh
        INNER JOIN habit_types AS ht ON ht.id = uh.habit_type_id
-       WHERE uh.user_id = ?
+       WHERE uh.user_id = $1
        ORDER BY uh.id ASC`,
       [userId]
     );
@@ -79,9 +79,9 @@ app.get(
     }
 
     const entries = await query(
-      `SELECT user_habit_id AS habitId, SUM(value) AS totalValue
+      `SELECT user_habit_id AS "habitId", SUM(value) AS "totalValue"
        FROM habit_entries
-       WHERE entry_date = ?
+       WHERE entry_date = $1
        GROUP BY user_habit_id`,
       [date]
     );
@@ -111,9 +111,17 @@ app.get(
     });
 
     const notifications = await query(
-      `SELECT id, user_habit_id AS habitId, title, message, type, channel, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt
+      `SELECT id,
+              user_habit_id AS "habitId",
+              title,
+              message,
+              type,
+              channel,
+              scheduled_for AS "scheduledFor",
+              read_at AS "readAt",
+              created_at AS "createdAt"
        FROM notifications
-       WHERE user_id = ?
+       WHERE user_id = $1
        ORDER BY COALESCE(scheduled_for, created_at) ASC
        LIMIT 10`,
       [userId]
@@ -163,19 +171,19 @@ app.get(
     let logs;
     if (dateFilter) {
       logs = await query(
-        `SELECT id, user_habit_id AS habitId, value, notes, logged_at AS loggedAt
+        `SELECT id, user_habit_id AS "habitId", value, notes, logged_at AS "loggedAt"
          FROM habit_entries
-         WHERE user_habit_id = ? AND entry_date = ?
+         WHERE user_habit_id = $1 AND entry_date = $2
          ORDER BY logged_at DESC`,
         [habitId, dateFilter.format('YYYY-MM-DD')]
       );
     } else {
       logs = await query(
-        `SELECT id, user_habit_id AS habitId, value, notes, logged_at AS loggedAt
+        `SELECT id, user_habit_id AS "habitId", value, notes, logged_at AS "loggedAt"
          FROM habit_entries
-         WHERE user_habit_id = ?
+         WHERE user_habit_id = $1
          ORDER BY logged_at DESC
-         LIMIT ?`,
+         LIMIT $2`,
         [habitId, limit]
       );
     }
@@ -212,19 +220,22 @@ app.post(
     }
 
     const entryDate = timestamp.format('YYYY-MM-DD');
-    const entryTimestamp = timestamp.format('YYYY-MM-DD HH:mm:ss');
+    const entryTimestamp = timestamp.toISOString();
 
     const result = await query(
       `INSERT INTO habit_entries (user_habit_id, entry_date, logged_at, value, notes)
-       VALUES (?, ?, ?, ?, ?)`
-        ,
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
       [habitId, entryDate, entryTimestamp, Number(value), notes ?? null]
     );
 
-    const insertedId = result.insertId;
+    const [inserted] = result;
+    if (!inserted) {
+      return res.status(500).json({ message: 'No se pudo crear el registro de hábito' });
+    }
 
     res.status(201).json({
-      id: insertedId,
+      id: inserted.id,
       habitId,
       value: Number(value),
       notes: notes ?? null,
@@ -242,7 +253,7 @@ app.get(
     const typeFilter = req.query.type ?? null;
 
     let sql =
-      'SELECT id, user_habit_id AS habitId, title, message, type, channel, scheduled_for AS scheduledFor, read_at AS readAt, created_at AS createdAt FROM notifications WHERE user_id = ?';
+      'SELECT id, user_habit_id AS "habitId", title, message, type, channel, scheduled_for AS "scheduledFor", read_at AS "readAt", created_at AS "createdAt" FROM notifications WHERE user_id = $1';
     const params = [userId];
 
     if (!includeRead) {
@@ -250,8 +261,8 @@ app.get(
     }
 
     if (typeFilter) {
-      sql += ' AND type = ?';
       params.push(typeFilter);
+      sql += ` AND type = $${params.length}`;
     }
 
     sql += ' ORDER BY COALESCE(scheduled_for, created_at) ASC';
@@ -277,12 +288,12 @@ app.patch(
 
     await query(
       `UPDATE notifications
-       SET read_at = NOW()
-       WHERE id = ?` ,
+       SET read_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
       [notificationId]
     );
 
-    res.json({ id: notificationId, readAt: dayjs().format('YYYY-MM-DD HH:mm:ss') });
+    res.json({ id: notificationId, readAt: dayjs().toISOString() });
   })
 );
 

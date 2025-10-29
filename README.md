@@ -1,7 +1,7 @@
 # Multimedia Diseño de Interfaces
 
 Aplicación móvil construida con Expo Router para el seguimiento de hábitos saludables.
-Este repositorio ahora incluye la definición de la base de datos MySQL y un servidor API de Node.js para conectar la app con los datos persistidos.
+Este repositorio ahora incluye la definición de la base de datos PostgreSQL y un servidor API de Node.js para conectar la app con los datos persistidos.
 
 ## Estructura del proyecto
 
@@ -10,7 +10,7 @@ Este repositorio ahora incluye la definición de la base de datos MySQL y un ser
 ├── components/             # Componentes reutilizables de UI
 ├── hooks/                  # Hooks personalizados (p. ej. consumo de API)
 ├── services/               # Clientes HTTP hacia el backend
-├── server/                 # API REST en Express + MySQL
+├── server/                 # API REST en Express + PostgreSQL
 ├── database/               # Scripts SQL para crear y poblar la base de datos
 └── constants/, utils/, types/  # Utilidades y tipados compartidos
 ```
@@ -19,12 +19,12 @@ Este repositorio ahora incluye la definición de la base de datos MySQL y un ser
 
 - Node.js >= 18
 - npm o pnpm
-- MySQL 8.x (o un servicio compatible) y MySQL Workbench para importar el esquema
+- PostgreSQL 14+ (o un servicio administrado compatible) y pgAdmin para gestionar la base de datos
 
 ## 1. Configuración de la base de datos
 
-1. Abre MySQL Workbench y conéctate a tu servidor MySQL.
-2. Ejecuta el script [`database/schema.sql`](database/schema.sql) para crear la base de datos `habit_tracker`, las tablas y los datos de ejemplo.
+1. Abre pgAdmin y crea una nueva base llamada `habit_tracker` (o ejecuta `CREATE DATABASE habit_tracker;`).
+2. Conéctate a esa base y ejecuta el script [`database/schema.sql`](database/schema.sql) para crear todas las tablas, tipos y datos de ejemplo.
 3. Opcionalmente ajusta los datos iniciales (usuarios, hábitos, notificaciones) según tus necesidades.
 
 El esquema incluye tablas normalizadas para cubrir los diferentes flujos de la aplicación:
@@ -38,15 +38,17 @@ El esquema incluye tablas normalizadas para cubrir los diferentes flujos de la a
 - `notifications`: mensajes enviados (recordatorios, logros, alertas) incluyendo el canal.
 - `notification_channels`: direcciones verificadas para push, correo o SMS.
 
-## 2. Servidor API (Express + MySQL)
+## 2. Servidor API (Express + PostgreSQL)
 
 1. Copia el archivo de variables de entorno y actualízalo con tus credenciales:
 
    ```bash
    cd server
    cp .env.example .env
-   # edita .env para apuntar a tu instancia MySQL
+   # edita .env para apuntar a tu instancia de PostgreSQL
    ```
+
+   Variables esperadas: `DB_HOST`, `DB_PORT` (por defecto 5432), `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL` (opcional, usa `true` cuando tu proveedor requiere conexión cifrada).
 
 2. Instala las dependencias y levanta el servidor:
 

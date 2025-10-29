@@ -1,176 +1,179 @@
--- Habit Tracker Database Schema
--- Run this script in MySQL Workbench to create the schema and seed data
+-- Habit Tracker Database Schema (PostgreSQL)
+-- Ejecuta este script desde pgAdmin (Query Tool) o psql estando conectado a la base de datos `habit_tracker`.
+-- Crea primero la base con: CREATE DATABASE habit_tracker;
 
-CREATE DATABASE IF NOT EXISTS habit_tracker CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE habit_tracker;
+-- Limpieza -----------------------------------------------------------------
 
--- Drop existing tables if they exist (optional during development)
-SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS notification_channels;
-DROP TABLE IF EXISTS notifications;
-DROP TABLE IF EXISTS habit_reminders;
-DROP TABLE IF EXISTS habit_entries;
-DROP TABLE IF EXISTS nutrition_meals;
-DROP TABLE IF EXISTS exercise_preferences;
-DROP TABLE IF EXISTS sleep_schedules;
-DROP TABLE IF EXISTS water_settings;
-DROP TABLE IF EXISTS user_habits;
-DROP TABLE IF EXISTS habit_types;
-DROP TABLE IF EXISTS user_metrics;
-DROP TABLE IF EXISTS users;
-SET FOREIGN_KEY_CHECKS = 1;
+DROP TABLE IF EXISTS notification_channels CASCADE;
+DROP TABLE IF EXISTS notifications CASCADE;
+DROP TABLE IF EXISTS habit_reminders CASCADE;
+DROP TABLE IF EXISTS habit_entries CASCADE;
+DROP TABLE IF EXISTS nutrition_meals CASCADE;
+DROP TABLE IF EXISTS exercise_preferences CASCADE;
+DROP TABLE IF EXISTS sleep_schedules CASCADE;
+DROP TABLE IF EXISTS water_settings CASCADE;
+DROP TABLE IF EXISTS user_habits CASCADE;
+DROP TABLE IF EXISTS habit_types CASCADE;
+DROP TABLE IF EXISTS user_metrics CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+DROP TYPE IF EXISTS notification_channel_type;
+DROP TYPE IF EXISTS notification_type_enum;
+DROP TYPE IF EXISTS habit_reminder_frequency_enum;
+DROP TYPE IF EXISTS habit_entry_source_enum;
+DROP TYPE IF EXISTS gender_type_enum;
+
+-- Tipos --------------------------------------------------------------------
+
+CREATE TYPE gender_type_enum AS ENUM ('female', 'male', 'non_binary', 'prefer_not_to_say');
+CREATE TYPE habit_entry_source_enum AS ENUM ('manual', 'auto', 'imported');
+CREATE TYPE habit_reminder_frequency_enum AS ENUM ('daily', 'weekdays', 'weekends', 'custom');
+CREATE TYPE notification_type_enum AS ENUM ('reminder', 'achievement', 'alert');
+CREATE TYPE notification_channel_type AS ENUM ('in_app', 'push', 'email', 'sms');
+
+-- Tablas -------------------------------------------------------------------
 
 CREATE TABLE users (
-  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   username VARCHAR(60) NOT NULL UNIQUE,
   email VARCHAR(150) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  height_cm SMALLINT UNSIGNED NOT NULL,
-  weight_kg DECIMAL(5,2) NOT NULL,
-  age TINYINT UNSIGNED NOT NULL,
-  gender ENUM('female', 'male', 'non_binary', 'prefer_not_to_say') DEFAULT 'prefer_not_to_say',
+  height_cm SMALLINT NOT NULL,
+  weight_kg NUMERIC(5, 2) NOT NULL,
+  age SMALLINT NOT NULL,
+  gender gender_type_enum DEFAULT 'prefer_not_to_say',
   timezone VARCHAR(100) DEFAULT 'America/Bogota',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE user_metrics (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id INT UNSIGNED NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   metric_date DATE NOT NULL,
-  weight_kg DECIMAL(5,2) DEFAULT NULL,
-  water_goal_ml INT UNSIGNED DEFAULT NULL,
-  sleep_goal_hours DECIMAL(3,1) DEFAULT NULL,
-  exercise_goal_minutes INT UNSIGNED DEFAULT NULL,
-  notes VARCHAR(255) DEFAULT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_user_metrics_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  UNIQUE KEY uk_user_metrics_date (user_id, metric_date)
+  weight_kg NUMERIC(5, 2),
+  water_goal_ml INTEGER,
+  sleep_goal_hours NUMERIC(3, 1),
+  exercise_goal_minutes INTEGER,
+  notes VARCHAR(255),
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (user_id, metric_date)
 );
 
 CREATE TABLE habit_types (
-  id TINYINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  id SMALLSERIAL PRIMARY KEY,
   slug VARCHAR(40) NOT NULL UNIQUE,
   name VARCHAR(120) NOT NULL,
   icon VARCHAR(50) NOT NULL,
   color VARCHAR(20) NOT NULL,
   default_unit VARCHAR(25) NOT NULL,
-  default_target_value DECIMAL(10,2) DEFAULT NULL
+  default_target_value NUMERIC(10, 2)
 );
 
 CREATE TABLE user_habits (
-  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id INT UNSIGNED NOT NULL,
-  habit_type_id TINYINT UNSIGNED NOT NULL,
-  custom_name VARCHAR(120) DEFAULT NULL,
-  target_value DECIMAL(10,2) NOT NULL,
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  habit_type_id SMALLINT NOT NULL REFERENCES habit_types(id) ON DELETE RESTRICT,
+  custom_name VARCHAR(120),
+  target_value NUMERIC(10, 2) NOT NULL,
   target_unit VARCHAR(25) NOT NULL,
-  reminder_enabled TINYINT(1) DEFAULT 0,
-  reminder_interval_minutes INT DEFAULT NULL,
-  reminder_time TIME DEFAULT NULL,
-  timezone VARCHAR(100) DEFAULT NULL,
-  metadata JSON DEFAULT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_user_habits_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  CONSTRAINT fk_user_habits_type FOREIGN KEY (habit_type_id) REFERENCES habit_types(id) ON DELETE RESTRICT
+  reminder_enabled BOOLEAN DEFAULT FALSE,
+  reminder_interval_minutes INTEGER,
+  reminder_time TIME,
+  timezone VARCHAR(100),
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE water_settings (
-  user_habit_id INT UNSIGNED PRIMARY KEY,
-  use_recommended_target TINYINT(1) DEFAULT 1,
-  recommended_target_ml INT UNSIGNED NOT NULL,
-  custom_target_ml INT UNSIGNED DEFAULT NULL,
-  reminder_interval_minutes INT DEFAULT 120,
-  last_recalculated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_water_settings_habit FOREIGN KEY (user_habit_id) REFERENCES user_habits(id) ON DELETE CASCADE
+  user_habit_id INTEGER PRIMARY KEY REFERENCES user_habits(id) ON DELETE CASCADE,
+  use_recommended_target BOOLEAN DEFAULT TRUE,
+  recommended_target_ml INTEGER NOT NULL,
+  custom_target_ml INTEGER,
+  reminder_interval_minutes INTEGER DEFAULT 120,
+  last_recalculated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE sleep_schedules (
-  user_habit_id INT UNSIGNED PRIMARY KEY,
+  user_habit_id INTEGER PRIMARY KEY REFERENCES user_habits(id) ON DELETE CASCADE,
   bed_time TIME NOT NULL,
   wake_time TIME NOT NULL,
-  reminder_enabled TINYINT(1) DEFAULT 1,
-  reminder_advance_minutes INT DEFAULT 30,
-  timezone VARCHAR(100) DEFAULT NULL,
-  CONSTRAINT fk_sleep_schedules_habit FOREIGN KEY (user_habit_id) REFERENCES user_habits(id) ON DELETE CASCADE
+  reminder_enabled BOOLEAN DEFAULT TRUE,
+  reminder_advance_minutes INTEGER DEFAULT 30,
+  timezone VARCHAR(100)
 );
 
 CREATE TABLE nutrition_meals (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_habit_id INT UNSIGNED NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  user_habit_id INTEGER NOT NULL REFERENCES user_habits(id) ON DELETE CASCADE,
   meal_code VARCHAR(40) NOT NULL,
   label VARCHAR(100) NOT NULL,
   scheduled_time TIME NOT NULL,
-  enabled TINYINT(1) DEFAULT 1,
-  reminder_enabled TINYINT(1) DEFAULT 1,
-  CONSTRAINT fk_nutrition_meals_habit FOREIGN KEY (user_habit_id) REFERENCES user_habits(id) ON DELETE CASCADE,
-  UNIQUE KEY uk_nutrition_meal (user_habit_id, meal_code)
+  enabled BOOLEAN DEFAULT TRUE,
+  reminder_enabled BOOLEAN DEFAULT TRUE,
+  UNIQUE (user_habit_id, meal_code)
 );
 
 CREATE TABLE exercise_preferences (
-  user_habit_id INT UNSIGNED PRIMARY KEY,
-  reminder_enabled TINYINT(1) DEFAULT 1,
-  reminder_time TIME DEFAULT NULL,
-  daily_goal_minutes INT UNSIGNED DEFAULT 30,
-  focus_area VARCHAR(120) DEFAULT NULL,
-  CONSTRAINT fk_exercise_preferences_habit FOREIGN KEY (user_habit_id) REFERENCES user_habits(id) ON DELETE CASCADE
+  user_habit_id INTEGER PRIMARY KEY REFERENCES user_habits(id) ON DELETE CASCADE,
+  reminder_enabled BOOLEAN DEFAULT TRUE,
+  reminder_time TIME,
+  daily_goal_minutes INTEGER DEFAULT 30,
+  focus_area VARCHAR(120)
 );
 
 CREATE TABLE habit_entries (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_habit_id INT UNSIGNED NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  user_habit_id INTEGER NOT NULL REFERENCES user_habits(id) ON DELETE CASCADE,
   entry_date DATE NOT NULL,
-  logged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  value DECIMAL(10,2) NOT NULL,
-  notes VARCHAR(255) DEFAULT NULL,
-  source ENUM('manual', 'auto', 'imported') DEFAULT 'manual',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_entries_user_habit FOREIGN KEY (user_habit_id) REFERENCES user_habits(id) ON DELETE CASCADE,
-  INDEX idx_entries_habit_date (user_habit_id, entry_date)
+  logged_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  value NUMERIC(10, 2) NOT NULL,
+  notes VARCHAR(255),
+  source habit_entry_source_enum DEFAULT 'manual',
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX idx_entries_habit_date ON habit_entries (user_habit_id, entry_date);
+
 CREATE TABLE habit_reminders (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_habit_id INT UNSIGNED NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  user_habit_id INTEGER NOT NULL REFERENCES user_habits(id) ON DELETE CASCADE,
   reminder_time TIME NOT NULL,
-  day_of_week TINYINT UNSIGNED DEFAULT NULL,
-  frequency ENUM('daily', 'weekdays', 'weekends', 'custom') DEFAULT 'daily',
-  enabled TINYINT(1) DEFAULT 1,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_habit_reminders_habit FOREIGN KEY (user_habit_id) REFERENCES user_habits(id) ON DELETE CASCADE
+  day_of_week SMALLINT,
+  frequency habit_reminder_frequency_enum DEFAULT 'daily',
+  enabled BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE notifications (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id INT UNSIGNED NOT NULL,
-  user_habit_id INT UNSIGNED DEFAULT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_habit_id INTEGER REFERENCES user_habits(id) ON DELETE SET NULL,
   title VARCHAR(150) NOT NULL,
   message VARCHAR(255) NOT NULL,
-  type ENUM('reminder', 'achievement', 'alert') DEFAULT 'reminder',
-  channel ENUM('in_app', 'push', 'email') DEFAULT 'in_app',
-  scheduled_for DATETIME DEFAULT NULL,
-  read_at DATETIME DEFAULT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  CONSTRAINT fk_notifications_habit FOREIGN KEY (user_habit_id) REFERENCES user_habits(id) ON DELETE SET NULL,
-  INDEX idx_notifications_user (user_id),
-  INDEX idx_notifications_schedule (scheduled_for)
+  type notification_type_enum DEFAULT 'reminder',
+  channel notification_channel_type DEFAULT 'in_app',
+  scheduled_for TIMESTAMPTZ,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_notifications_user ON notifications (user_id);
+CREATE INDEX idx_notifications_schedule ON notifications (scheduled_for);
 
 CREATE TABLE notification_channels (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id INT UNSIGNED NOT NULL,
-  channel ENUM('push', 'email', 'sms') NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel notification_channel_type NOT NULL,
   address VARCHAR(255) NOT NULL,
-  verified_at DATETIME DEFAULT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_notification_channels_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  UNIQUE KEY uk_channel_address (user_id, channel, address)
+  verified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (user_id, channel, address)
 );
 
--- Seed data ---------------------------------------------------------------
+-- Datos de ejemplo ---------------------------------------------------------
 
 INSERT INTO users (username, email, password_hash, height_cm, weight_kg, age, gender)
 VALUES ('maria', 'maria@example.com', '$2y$10$abcdefghijklmnopqrstuvwxyz0123456789abcdefghi', 165, 64.5, 29, 'female');
@@ -182,84 +185,123 @@ VALUES
   ('exercise', 'Ejercicio', 'Dumbbell', '#16a34a', 'minutos', 30),
   ('nutrition', 'Alimentación Saludable', 'Apple', '#f97316', 'comidas', 3);
 
-INSERT INTO user_habits (
-  user_id,
-  habit_type_id,
-  custom_name,
-  target_value,
-  target_unit,
-  reminder_enabled,
-  reminder_interval_minutes,
-  reminder_time,
-  timezone
+-- Configuración de hábitos por usuario
+WITH water_type AS (
+  SELECT id, default_target_value, default_unit FROM habit_types WHERE slug = 'water'
+), water_habit AS (
+  INSERT INTO user_habits (user_id, habit_type_id, custom_name, target_value, target_unit, reminder_enabled, reminder_interval_minutes, reminder_time, timezone)
+  SELECT 1, id, NULL, default_target_value, default_unit, TRUE, 120, NULL, 'America/Bogota'
+  FROM water_type
+  RETURNING id
 )
-SELECT
-  1,
-  id,
-  NULL,
-  default_target_value,
-  default_unit,
-  CASE WHEN slug IN ('water', 'sleep', 'exercise', 'nutrition') THEN 1 ELSE 0 END,
-  CASE WHEN slug = 'water' THEN 120 ELSE NULL END,
-  CASE WHEN slug = 'sleep' THEN '22:30:00' WHEN slug = 'exercise' THEN '07:00:00' ELSE NULL END,
-  'America/Bogota'
-FROM habit_types
-ORDER BY id;
-
--- Water habit detailed settings
 INSERT INTO water_settings (user_habit_id, use_recommended_target, recommended_target_ml, custom_target_ml, reminder_interval_minutes)
-VALUES (1, 1, 2200, NULL, 120);
+SELECT id, TRUE, 2200, NULL, 120 FROM water_habit;
 
--- Sleep routine
+WITH sleep_type AS (
+  SELECT id, default_target_value, default_unit FROM habit_types WHERE slug = 'sleep'
+), sleep_habit AS (
+  INSERT INTO user_habits (user_id, habit_type_id, custom_name, target_value, target_unit, reminder_enabled, reminder_interval_minutes, reminder_time, timezone)
+  SELECT 1, id, NULL, default_target_value, default_unit, TRUE, NULL, TIME '22:30:00', 'America/Bogota'
+  FROM sleep_type
+  RETURNING id
+)
 INSERT INTO sleep_schedules (user_habit_id, bed_time, wake_time, reminder_enabled, reminder_advance_minutes, timezone)
-VALUES (2, '22:30:00', '06:30:00', 1, 30, 'America/Bogota');
+SELECT id, TIME '22:30:00', TIME '06:30:00', TRUE, 30, 'America/Bogota' FROM sleep_habit;
 
--- Nutrition meal plan
-INSERT INTO nutrition_meals (user_habit_id, meal_code, label, scheduled_time, enabled, reminder_enabled)
-VALUES
-  (4, 'breakfast', 'Desayuno', '08:00:00', 1, 1),
-  (4, 'lunch', 'Almuerzo', '13:00:00', 1, 1),
-  (4, 'dinner', 'Cena', '20:00:00', 1, 1);
-
--- Exercise preferences
+WITH exercise_type AS (
+  SELECT id, default_target_value, default_unit FROM habit_types WHERE slug = 'exercise'
+), exercise_habit AS (
+  INSERT INTO user_habits (user_id, habit_type_id, custom_name, target_value, target_unit, reminder_enabled, reminder_interval_minutes, reminder_time, timezone)
+  SELECT 1, id, NULL, default_target_value, default_unit, TRUE, NULL, TIME '07:00:00', 'America/Bogota'
+  FROM exercise_type
+  RETURNING id
+)
 INSERT INTO exercise_preferences (user_habit_id, reminder_enabled, reminder_time, daily_goal_minutes, focus_area)
-VALUES (3, 1, '07:00:00', 35, 'Fuerza y resistencia');
+SELECT id, TRUE, TIME '07:00:00', 35, 'Fuerza y resistencia' FROM exercise_habit;
 
--- Sample metrics history
-SET @today := CURDATE();
+WITH nutrition_type AS (
+  SELECT id, default_target_value, default_unit FROM habit_types WHERE slug = 'nutrition'
+), nutrition_habit AS (
+  INSERT INTO user_habits (user_id, habit_type_id, custom_name, target_value, target_unit, reminder_enabled, reminder_interval_minutes, reminder_time, timezone)
+  SELECT 1, id, NULL, default_target_value, default_unit, TRUE, NULL, NULL, 'America/Bogota'
+  FROM nutrition_type
+  RETURNING id
+)
+INSERT INTO nutrition_meals (user_habit_id, meal_code, label, scheduled_time, enabled, reminder_enabled)
+SELECT nh.id, meals.meal_code, meals.label, meals.scheduled_time, meals.enabled, meals.reminder_enabled
+FROM nutrition_habit AS nh
+JOIN (VALUES
+  ('breakfast', 'Desayuno', TIME '08:00:00', TRUE, TRUE),
+  ('lunch', 'Almuerzo', TIME '13:00:00', TRUE, TRUE),
+  ('dinner', 'Cena', TIME '20:00:00', TRUE, TRUE)
+) AS meals(meal_code, label, scheduled_time, enabled, reminder_enabled) ON TRUE;
+
+-- Historial de métricas
 INSERT INTO user_metrics (user_id, metric_date, weight_kg, water_goal_ml, sleep_goal_hours, exercise_goal_minutes, notes)
 VALUES
-  (1, DATE_SUB(@today, INTERVAL 2 DAY), 64.8, 2200, 8.0, 35, 'Semana con mucha energía'),
-  (1, DATE_SUB(@today, INTERVAL 1 DAY), 64.6, 2200, 8.0, 35, 'Seguimiento estable');
+  (1, CURRENT_DATE - INTERVAL '2 days', 64.8, 2200, 8.0, 35, 'Semana con mucha energía'),
+  (1, CURRENT_DATE - INTERVAL '1 day', 64.6, 2200, 8.0, 35, 'Seguimiento estable');
 
--- Sample entries for current week ----------------------------------------
-
+-- Registros de hábitos recientes
+WITH water AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'water'
+), sleep AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'sleep'
+), exercise AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'exercise'
+), nutrition AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'nutrition'
+)
 INSERT INTO habit_entries (user_habit_id, entry_date, logged_at, value, notes, source)
-VALUES
-  (1, @today, CONCAT(@today, ' 08:30:00'), 250, 'Vaso de agua al despertar', 'manual'),
-  (1, @today, CONCAT(@today, ' 12:15:00'), 500, 'Botella durante el almuerzo', 'manual'),
-  (1, @today, CONCAT(@today, ' 15:45:00'), 750, 'Botella grande después de entrenar', 'manual'),
-  (1, @today, CONCAT(@today, ' 18:30:00'), 250, 'Vaso de agua', 'manual'),
-  (2, DATE_SUB(@today, INTERVAL 1 DAY), CONCAT(DATE_SUB(@today, INTERVAL 1 DAY), ' 22:30:00'), 8, 'Dormí muy bien', 'manual'),
-  (3, DATE_SUB(@today, INTERVAL 1 DAY), CONCAT(DATE_SUB(@today, INTERVAL 1 DAY), ' 07:30:00'), 35, 'Rutina de fuerza', 'manual'),
-  (4, DATE_SUB(@today, INTERVAL 1 DAY), CONCAT(DATE_SUB(@today, INTERVAL 1 DAY), ' 13:00:00'), 3, 'Comidas completas y saludables', 'manual');
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '08:30:00', 250, 'Vaso de agua al despertar', 'manual' FROM water
+UNION ALL
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '12:15:00', 500, 'Botella durante el almuerzo', 'manual' FROM water
+UNION ALL
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '15:45:00', 750, 'Botella grande después de entrenar', 'manual' FROM water
+UNION ALL
+SELECT water.id, CURRENT_DATE, CURRENT_DATE + TIME '18:30:00', 250, 'Vaso de agua', 'manual' FROM water
+UNION ALL
+SELECT sleep.id, CURRENT_DATE - INTERVAL '1 day', (CURRENT_DATE - INTERVAL '1 day') + TIME '22:30:00', 8, 'Dormí muy bien', 'manual' FROM sleep
+UNION ALL
+SELECT exercise.id, CURRENT_DATE - INTERVAL '1 day', (CURRENT_DATE - INTERVAL '1 day') + TIME '07:30:00', 35, 'Rutina de fuerza', 'manual' FROM exercise
+UNION ALL
+SELECT nutrition.id, CURRENT_DATE - INTERVAL '1 day', (CURRENT_DATE - INTERVAL '1 day') + TIME '13:00:00', 3, 'Comidas completas y saludables', 'manual' FROM nutrition;
 
+-- Recordatorios configurados
+WITH water AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'water'
+), sleep AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'sleep'
+), exercise AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'exercise'
+), nutrition AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'nutrition'
+)
 INSERT INTO habit_reminders (user_habit_id, reminder_time, day_of_week, frequency, enabled)
-VALUES
-  (1, '09:00:00', NULL, 'daily', 1),
-  (1, '15:00:00', NULL, 'daily', 1),
-  (2, '22:00:00', NULL, 'daily', 1),
-  (3, '06:30:00', NULL, 'weekdays', 1),
-  (4, '12:30:00', NULL, 'daily', 1);
+SELECT water.id, TIME '09:00:00', NULL, 'daily', TRUE FROM water
+UNION ALL
+SELECT water.id, TIME '15:00:00', NULL, 'daily', TRUE FROM water
+UNION ALL
+SELECT sleep.id, TIME '22:00:00', NULL, 'daily', TRUE FROM sleep
+UNION ALL
+SELECT exercise.id, TIME '06:30:00', NULL, 'weekdays', TRUE FROM exercise
+UNION ALL
+SELECT nutrition.id, TIME '12:30:00', NULL, 'daily', TRUE FROM nutrition;
 
+-- Notificaciones de ejemplo
+WITH water AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'water'
+), exercise AS (
+  SELECT uh.id FROM user_habits uh JOIN habit_types ht ON ht.id = uh.habit_type_id WHERE uh.user_id = 1 AND ht.slug = 'exercise'
+)
 INSERT INTO notifications (user_id, user_habit_id, title, message, type, channel, scheduled_for)
-VALUES
-  (1, 1, '💧 ¡Es hora de beber agua!', 'Te quedan 500ml para cumplir tu meta diaria.', 'reminder', 'push', CONCAT(@today, ' 17:00:00')),
-  (1, 3, '🔥 ¡Gran trabajo!', 'Completaste tu objetivo de ejercicio ayer.', 'achievement', 'in_app', NULL),
-  (1, NULL, '✨ Racha de Hábitos', 'Llevas 7 días manteniendo tu racha.', 'achievement', 'in_app', NULL);
+SELECT 1, water.id, '💧 ¡Es hora de beber agua!', 'Te quedan 500ml para cumplir tu meta diaria.', 'reminder', 'push', CURRENT_DATE + TIME '17:00:00' FROM water
+UNION ALL
+SELECT 1, exercise.id, '🔥 ¡Gran trabajo!', 'Completaste tu objetivo de ejercicio ayer.', 'achievement', 'in_app', NULL FROM exercise
+UNION ALL
+SELECT 1, NULL, '✨ Racha de Hábitos', 'Llevas 7 días manteniendo tu racha.', 'achievement', 'in_app', NULL;
 
 INSERT INTO notification_channels (user_id, channel, address, verified_at)
 VALUES
-  (1, 'push', 'expo-push-token[demo]', NOW()),
-  (1, 'email', 'maria@example.com', NOW());
-
+  (1, 'push', 'expo-push-token[demo]', CURRENT_TIMESTAMP),
+  (1, 'email', 'maria@example.com', CURRENT_TIMESTAMP);
