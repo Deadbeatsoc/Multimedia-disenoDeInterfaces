@@ -1,3 +1,18 @@
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api';
+import Constants from 'expo-constants';
 
-export const DEFAULT_USER_ID = 1;
+type ExpoExtra = { apiUrl?: string };
+
+type ExpoConfig = typeof Constants & {
+  expoConfig?: { extra?: ExpoExtra };
+  manifest?: { extra?: ExpoExtra };
+};
+
+export const resolveApiBaseUrl = () => {
+  const extra =
+    (Constants as ExpoConfig)?.expoConfig?.extra ?? (Constants as ExpoConfig)?.manifest?.extra ?? {};
+
+  return (extra?.apiUrl as string | undefined) ?? process.env.EXPO_PUBLIC_API_URL ?? '';
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
