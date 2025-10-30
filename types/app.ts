@@ -3,7 +3,6 @@ import { HabitSlug } from './api';
 export interface UserProfile {
   username: string;
   email: string;
-  password: string;
   height: number;
   weight: number;
   age: number;
