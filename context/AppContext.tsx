@@ -147,8 +147,8 @@ const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): Us
   const emailCandidate =
     (typeof apiUser?.email === 'string' && apiUser.email) ?? fallback.email ?? '';
   const usernameCandidate =
-    (typeof apiUser?.username === 'string' && apiUser.username) ||
     (typeof apiUser?.name === 'string' && apiUser.name) ||
+    (typeof apiUser?.username === 'string' && apiUser.username) ||
     fallback.username ||
     emailCandidate ||
     'Usuario';

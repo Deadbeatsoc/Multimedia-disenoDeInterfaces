@@ -139,13 +139,6 @@ app.post(
       return res.status(400).json({ message: 'Edad inválida' });
     }
 
-  const result = await query(
-    `INSERT INTO users (username, email, password_hash, height_cm, weight_kg, age)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, username AS name, email, height_cm AS height, weight_kg AS weight, age, created_at AS "createdAt"`,
-    [name, email, passwordHash, height, weight, age]
-  );
-
     const passwordHash = await bcrypt.hash(String(password), 10);
     const client = await getClient();
 
@@ -735,6 +728,7 @@ app.patch(
           wakeTime: wakeTime.slice(0, 5),
           reminderEnabled,
           reminderAdvance: reminderAdvance ?? 30,
+          reminderAdvanceMinutes: reminderAdvance ?? 30,
           targetValue: targetValue ?? undefined,
         };
       } else if (habit.slug === 'exercise') {
