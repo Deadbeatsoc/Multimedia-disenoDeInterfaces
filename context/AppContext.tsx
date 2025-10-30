@@ -599,7 +599,14 @@ export function AppProvider({ children }: PropsWithChildren) {
   const request = useCallback(
     <T,>(endpoint: string, options: ApiRequestOptions = {}): Promise<T> => {
       return apiFetch<T>(endpoint, options).then((result: T) => {
-        if (endpoint.startsWith('/api/dashboard')) {
+        const normalizedEndpoint = (() => {
+          const trimmed = endpoint.startsWith('/api')
+            ? endpoint.slice(4)
+            : endpoint;
+          return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+        })();
+
+        if (normalizedEndpoint.startsWith('/dashboard')) {
           const dashboardPayload = result as unknown as DashboardResponse | null;
           if (dashboardPayload && Array.isArray(dashboardPayload.habits)) {
             syncHabitSummaries(dashboardPayload.habits);
@@ -803,7 +810,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       try {
         const data = await apiFetch<{ token?: string; user?: any }>(
-          '/api/auth/login',
+          '/auth/login',
           {
             method: 'POST',
             body: JSON.stringify({
@@ -875,7 +882,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setToken(storedToken);
 
       const decodedUserId = extractUserIdFromToken(storedToken);
-      const data = await apiFetch<{ user?: unknown }>('/api/auth/me');
+      const data = await apiFetch<{ user?: unknown }>('/auth/me');
       const profile = buildUserProfile(data?.user ?? data, {
         id: decodedUserId ?? null,
       });
@@ -988,7 +995,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         return user as UserProfile;
       }
 
-      const data = await apiFetch<{ user?: unknown }>('/api/auth/me', {
+      const data = await apiFetch<{ user?: unknown }>('/auth/me', {
         method: 'PATCH',
         body: JSON.stringify(apiPayload),
       });
@@ -1050,7 +1057,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           useRecommendedTarget: boolean;
           reminderInterval: number;
         };
-      }>('/api/habits/settings', {
+      }>('/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });
@@ -1097,7 +1104,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           reminderAdvance: number;
           targetValue?: number;
         };
-      }>('/api/habits/settings', {
+      }>('/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });
@@ -1135,7 +1142,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           meals: { id: string; label: string; time: string; enabled: boolean }[];
           targetValue: number;
         };
-      }>('/api/habits/settings', {
+      }>('/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify({
           type: 'nutrition',
@@ -1200,7 +1207,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           reminderTime: string;
           dailyGoalMinutes: number;
         };
-      }>('/api/habits/settings', {
+      }>('/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });
@@ -1228,7 +1235,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const markNotificationAsRead = useCallback<AppContextValue['markNotificationAsRead']>(
     async (notificationId) => {
-      await apiFetch(`/api/notifications/${notificationId}/read`, {
+      await apiFetch(`/notifications/${notificationId}/read`, {
         method: 'PATCH',
       });
 
