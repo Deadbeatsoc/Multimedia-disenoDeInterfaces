@@ -333,6 +333,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(false);
 
   const nextNotificationId = useRef(1);
+  const loadSessionRef = useRef<AppContextValue['loadSession'] | null>(null);
 
   const persistAuthSession = useCallback(
     async (authToken: string, profile: UserProfile) => {
@@ -933,15 +934,15 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoading(false);
     }
-  }, [
-    fetchAndSyncDashboardHabits,
-    initializeUserSession,
-    resetAppState,
-  ]);
+  }, [fetchAndSyncDashboardHabits, initializeUserSession, resetAppState]);
 
   useEffect(() => {
-    loadSession();
+    loadSessionRef.current = loadSession;
   }, [loadSession]);
+
+  useEffect(() => {
+    loadSessionRef.current?.();
+  }, []);
 
   const signOut = useCallback<AppContextValue['signOut']>(async () => {
     try {
