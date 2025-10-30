@@ -10,7 +10,14 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { HabitLog, HabitSlug, HabitSummary, NotificationItem, ReminderItem } from '@/types/api';
+import {
+  DashboardResponse,
+  HabitLog,
+  HabitSlug,
+  HabitSummary,
+  NotificationItem,
+  ReminderItem,
+} from '@/types/api';
 import {
   DailySnapshot,
   ExerciseHabitSettings,
@@ -77,13 +84,6 @@ interface AppContextValue {
   refreshReminders: () => void;
   request: <T>(endpoint: string, options?: ApiFetchOptions) => Promise<T>;
 }
-
-const HABIT_IDS: Record<HabitSlug, number> = {
-  water: 1,
-  sleep: 2,
-  exercise: 3,
-  nutrition: 4,
-};
 
 const HABIT_UNITS: Record<HabitSlug, string> = {
   water: 'ml',
@@ -194,6 +194,14 @@ const buildHabitStates = (
   },
 });
 
+const getHabitIdFromMap = (
+  habitMap: Record<HabitSlug, HabitState>,
+  slug: HabitSlug
+): number | null => {
+  const identifier = habitMap[slug]?.summary.id;
+  return isValidHabitId(identifier) ? identifier : null;
+};
+
 type ApiFetchOptions = RequestInit & { skipAuth?: boolean };
 
 const parseApiPayload = (text: string) => {
@@ -268,7 +276,7 @@ const formatProgressText = (value: number, target: number, unit: string) => {
 };
 
 const createHabitSummary = (slug: HabitSlug, targetValue: number): HabitSummary => ({
-  id: HABIT_IDS[slug],
+  id: 0,
   slug,
   name: HABIT_NAMES[slug],
   icon: HABIT_ICONS[slug],
@@ -280,6 +288,9 @@ const createHabitSummary = (slug: HabitSlug, targetValue: number): HabitSummary 
   isComplete: false,
   progressText: formatProgressText(0, targetValue, HABIT_UNITS[slug]),
 });
+
+const isValidHabitId = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
 
 const computeRecommendedWater = (height: number, weight: number) => {
   const base = weight * 35; // ml por kilo
@@ -385,7 +396,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       ) => {
         items.push({
           id: nextNotificationId.current++,
-          habitId: HABIT_IDS[slug],
+          habitId: getHabitIdFromMap(nextHabits, slug),
           title,
           message,
           type: 'reminder',
@@ -433,12 +444,154 @@ export function AppProvider({ children }: PropsWithChildren) {
     []
   );
 
+  const syncHabitSummaries = useCallback(
+    (summaries: HabitSummary[] | null | undefined) => {
+      if (!summaries || summaries.length === 0) {
+        return;
+      }
+
+      let computedHabits: Record<HabitSlug, HabitState> | null = null;
+
+      setHabits((prev) => {
+        const next = { ...prev } as Record<HabitSlug, HabitState>;
+        let hasUpdates = false;
+
+        summaries.forEach((summary) => {
+          const slug = summary?.slug as HabitSlug | undefined;
+          if (!slug || !(slug in next)) {
+            return;
+          }
+
+          const current = next[slug];
+          const nextTargetUnit =
+            summary.targetUnit ?? current.summary.targetUnit ?? HABIT_UNITS[slug];
+
+          const updatedSummary: HabitSummary = {
+            ...current.summary,
+            ...summary,
+            slug,
+            name: summary.name ?? current.summary.name ?? HABIT_NAMES[slug],
+            icon: summary.icon ?? current.summary.icon ?? HABIT_ICONS[slug],
+            color: summary.color ?? current.summary.color ?? HABIT_COLORS[slug],
+            targetUnit: nextTargetUnit,
+            progressText:
+              summary.progressText ??
+              formatProgressText(
+                summary.progressValue ?? current.summary.progressValue,
+                summary.targetValue ?? current.summary.targetValue,
+                nextTargetUnit
+              ),
+          };
+
+          const hasDifference =
+            current.summary.id !== updatedSummary.id ||
+            current.summary.name !== updatedSummary.name ||
+            current.summary.icon !== updatedSummary.icon ||
+            current.summary.color !== updatedSummary.color ||
+            current.summary.targetValue !== updatedSummary.targetValue ||
+            current.summary.targetUnit !== updatedSummary.targetUnit ||
+            current.summary.progressValue !== updatedSummary.progressValue ||
+            current.summary.completionRate !== updatedSummary.completionRate ||
+            current.summary.isComplete !== updatedSummary.isComplete ||
+            current.summary.progressText !== updatedSummary.progressText;
+
+          if (!hasDifference) {
+            return;
+          }
+
+          hasUpdates = true;
+          next[slug] = {
+            ...current,
+            summary: updatedSummary,
+          };
+        });
+
+        if (!hasUpdates) {
+          return prev;
+        }
+
+        computedHabits = next;
+        return next;
+      });
+
+      if (computedHabits) {
+        recomputeDailySnapshot(computedHabits);
+        rebuildReminders(computedHabits, settings);
+      }
+    },
+    [rebuildReminders, recomputeDailySnapshot, settings]
+  );
+
+  const updateHabitIdentifier = useCallback(
+    (slug: HabitSlug, identifier?: number | null) => {
+      if (!isValidHabitId(identifier)) {
+        return;
+      }
+
+      let computedHabits: Record<HabitSlug, HabitState> | null = null;
+
+      setHabits((prev) => {
+        const current = prev[slug];
+        if (!current || current.summary.id === identifier) {
+          return prev;
+        }
+
+        const next = {
+          ...prev,
+          [slug]: {
+            ...current,
+            summary: {
+              ...current.summary,
+              id: identifier,
+            },
+          },
+        } as Record<HabitSlug, HabitState>;
+
+        computedHabits = next;
+        return next;
+      });
+
+      if (computedHabits) {
+        recomputeDailySnapshot(computedHabits);
+        rebuildReminders(computedHabits, settings);
+      }
+    },
+    [rebuildReminders, recomputeDailySnapshot, settings]
+  );
+
+  const fetchAndSyncDashboardHabits = useCallback(async () => {
+    try {
+      const dashboardData = await apiFetch<DashboardResponse>('/dashboard');
+      if (dashboardData && Array.isArray(dashboardData.habits)) {
+        syncHabitSummaries(dashboardData.habits);
+      }
+    } catch (error) {
+      console.warn('No se pudo sincronizar los hábitos con el servidor:', error);
+    }
+  }, [syncHabitSummaries]);
+
+  const request = useCallback(
+    async <T>(endpoint: string, options: ApiFetchOptions = {}) => {
+      const result = await apiFetch<T>(endpoint, options);
+
+      if (endpoint.startsWith('/dashboard')) {
+        const dashboardPayload = result as unknown as DashboardResponse | null;
+        if (dashboardPayload && Array.isArray(dashboardPayload.habits)) {
+          syncHabitSummaries(dashboardPayload.habits);
+        }
+      }
+
+      return result;
+    },
+    [syncHabitSummaries]
+  );
+
   const registerAchievementNotification = useCallback(
     (slug: HabitSlug, message: string) => {
       setNotifications((prev) => [
         {
           id: nextNotificationId.current++,
-          habitId: HABIT_IDS[slug],
+          habitId: getHabitIdFromMap(habits, slug),
           title: '🎉 ¡Objetivo alcanzado!',
           message,
           type: 'achievement',
@@ -450,7 +603,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         ...prev,
       ]);
     },
-    []
+    [habits]
   );
 
   const resetAppState = useCallback(() => {
@@ -512,6 +665,11 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
 
       const habitId = habit.summary.id;
+      if (!isValidHabitId(habitId)) {
+        throw new Error(
+          'No se pudo identificar este hábito. Actualiza la información e inténtalo nuevamente.'
+        );
+      }
       const timestamp = new Date().toISOString();
 
       const data = await apiFetch<HabitLog>(`/habits/${habitId}/logs`, {
@@ -657,6 +815,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           welcomeMessage:
             'Configura tus hábitos para recibir recordatorios personalizados.',
         });
+        await fetchAndSyncDashboardHabits();
         await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
         await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
@@ -669,7 +828,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         setIsLoading(false);
       }
     },
-    [initializeUserSession]
+    [fetchAndSyncDashboardHabits, initializeUserSession]
   );
 
   const authenticate = useCallback<AppContextValue['authenticate']>(
@@ -708,6 +867,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           welcomeTitle: '👋 ¡Bienvenido de nuevo!',
           welcomeMessage: 'Revisa tus hábitos para continuar con tu progreso.',
         });
+        await fetchAndSyncDashboardHabits();
         await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
         await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
@@ -720,7 +880,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         setIsLoading(false);
       }
     },
-    [initializeUserSession]
+    [fetchAndSyncDashboardHabits, initializeUserSession]
   );
 
   const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
@@ -742,6 +902,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       const profile = buildUserProfile(data?.user ?? data);
 
       initializeUserSession(profile);
+      await fetchAndSyncDashboardHabits();
       await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
     } catch (error) {
       const status = (error as { status?: number }).status;
@@ -773,7 +934,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoading(false);
     }
-  }, [initializeUserSession, resetAppState]);
+  }, [fetchAndSyncDashboardHabits, initializeUserSession, resetAppState]);
 
   useEffect(() => {
     loadSession();
@@ -913,8 +1074,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       };
 
       applySettings(nextSettings);
+      updateHabitIdentifier('water', response?.habitId);
     },
-    [applySettings, settings]
+    [applySettings, settings, updateHabitIdentifier]
   );
 
   const updateSleepSettings = useCallback<AppContextValue['updateSleepSettings']>(
@@ -955,8 +1117,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       };
 
       applySettings(nextSettings);
+      updateHabitIdentifier('sleep', response?.habitId);
     },
-    [applySettings, settings]
+    [applySettings, settings, updateHabitIdentifier]
   );
 
   const updateNutritionSettings = useCallback<AppContextValue['updateNutritionSettings']>(
@@ -1002,8 +1165,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       };
 
       applySettings(nextSettings);
+      updateHabitIdentifier('nutrition', response?.habitId);
     },
-    [applySettings, settings]
+    [applySettings, settings, updateHabitIdentifier]
   );
 
   const updateMealTime = useCallback<AppContextValue['updateMealTime']>(
@@ -1055,8 +1219,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       };
 
       applySettings(nextSettings);
+      updateHabitIdentifier('exercise', response?.habitId);
     },
-    [applySettings, settings]
+    [applySettings, settings, updateHabitIdentifier]
   );
 
   const getHabitHistory = useCallback<AppContextValue['getHabitHistory']>(
@@ -1131,7 +1296,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       updateExerciseSettings,
       markNotificationAsRead,
       refreshReminders,
-      request: apiFetch,
+      request,
     }),
     [
       dashboard,
@@ -1140,6 +1305,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       logHabitEntry,
       loadSession,
       markNotificationAsRead,
+      request,
       refreshReminders,
       signOut,
       authenticate,
