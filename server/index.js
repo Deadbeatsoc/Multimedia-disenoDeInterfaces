@@ -244,16 +244,17 @@ app.post(
 
         const [exerciseHabitRow] = exerciseHabit.rows;
         if (exerciseHabitRow) {
-          await client.query(
-            `INSERT INTO exercise_preferences (user_habit_id, reminder_enabled, reminder_time, daily_goal_minutes)
-             VALUES ($1, TRUE, TIME '18:00:00', $2)
-             ON CONFLICT (user_habit_id)
-             DO UPDATE SET
-               reminder_enabled = EXCLUDED.reminder_enabled,
-               reminder_time = EXCLUDED.reminder_time,
-               daily_goal_minutes = EXCLUDED.daily_goal_minutes`,
-            [exerciseHabitRow.id, exerciseType.defaultTarget ?? 30]
-          );
+await client.query(
+  `INSERT INTO exercise_preferences (user_habit_id, reminder_enabled, reminder_time, daily_goal_minutes)
+   VALUES ($1, TRUE, TIME '18:00:00', $2)
+   ON CONFLICT (user_habit_id)
+   DO UPDATE SET
+     reminder_enabled = EXCLUDED.reminder_enabled,
+     reminder_time = EXCLUDED.reminder_time,
+     daily_goal_minutes = EXCLUDED.daily_goal_minutes`,
+  [exerciseHabitRow.id, Math.round(Number(exerciseType.defaultTarget ?? 30))]
+);
+
         }
       }
 
@@ -610,19 +611,36 @@ app.patch(
            WHERE id = $3`,
           [resolvedTarget, reminderIntervalValue, habit.id]
         );
+console.log({
+  habitId: habit.id,
+  useRecommendedTarget,
+  recommendedTarget,
+  customTarget,
+  reminderIntervalValue
+});
 
+        
         await client.query(
-          `INSERT INTO water_settings (user_habit_id, use_recommended_target, recommended_target_ml, custom_target_ml, reminder_interval_minutes)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (user_habit_id)
-           DO UPDATE SET
-             use_recommended_target = EXCLUDED.use_recommended_target,
-             recommended_target_ml = EXCLUDED.recommended_target_ml,
-             custom_target_ml = EXCLUDED.custom_target_ml,
-             reminder_interval_minutes = EXCLUDED.reminder_interval_minutes,
-             last_recalculated_at = CURRENT_TIMESTAMP`,
-          [habit.id, useRecommendedTarget, recommendedTarget, customTarget, reminderIntervalValue]
-        );
+  `INSERT INTO water_settings (user_habit_id, use_recommended_target, recommended_target_ml, custom_target_ml, reminder_interval_minutes)
+   VALUES ($1, $2, $3, $4, $5)
+   ON CONFLICT (user_habit_id)
+   DO UPDATE SET
+     use_recommended_target = EXCLUDED.use_recommended_target,
+     recommended_target_ml = EXCLUDED.recommended_target_ml,
+     custom_target_ml = EXCLUDED.custom_target_ml,
+     reminder_interval_minutes = EXCLUDED.reminder_interval_minutes,
+     last_recalculated_at = CURRENT_TIMESTAMP`,
+     
+  [
+    
+    habit.id,
+    useRecommendedTarget,
+    Math.round(Number(recommendedTarget ?? 0)),
+    customTarget ? Math.round(Number(customTarget)) : null,
+    Math.round(Number(reminderIntervalValue ?? 120)),
+  ]
+);
+
 
         responsePayload = {
           type: 'water',
@@ -787,15 +805,16 @@ app.patch(
         );
 
         await client.query(
-          `INSERT INTO exercise_preferences (user_habit_id, reminder_enabled, reminder_time, daily_goal_minutes)
-           VALUES ($1, $2, $3::time, $4)
-           ON CONFLICT (user_habit_id)
-           DO UPDATE SET
-             reminder_enabled = EXCLUDED.reminder_enabled,
-             reminder_time = EXCLUDED.reminder_time,
-             daily_goal_minutes = EXCLUDED.daily_goal_minutes`,
-          [habit.id, reminderEnabled, reminderTime, dailyGoalMinutes]
-        );
+  `INSERT INTO exercise_preferences (user_habit_id, reminder_enabled, reminder_time, daily_goal_minutes)
+   VALUES ($1, TRUE, TIME '18:00:00', $2)
+   ON CONFLICT (user_habit_id)
+   DO UPDATE SET
+     reminder_enabled = EXCLUDED.reminder_enabled,
+     reminder_time = EXCLUDED.reminder_time,
+     daily_goal_minutes = EXCLUDED.daily_goal_minutes`,
+  [exerciseHabitRow.id, Math.round(Number(exerciseType.defaultTarget ?? 30))]
+);
+
 
         responsePayload = {
           type: 'exercise',
