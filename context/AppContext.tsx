@@ -143,28 +143,61 @@ const DEFAULT_PROFILE_METRICS: Pick<UserProfile, 'height' | 'weight' | 'age'> = 
   age: 28,
 };
 
-const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): UserProfile => {
+const sanitizeProfileSource = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const {
+    password: _password,
+    passwordHash: _passwordHash,
+    token: _token,
+    accessToken: _accessToken,
+    refreshToken: _refreshToken,
+    ...rest
+  } = value as Record<string, unknown>;
+
+  return rest;
+};
+
+const coerceString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const buildUserProfile = (
+  apiUser: unknown,
+  fallback: Partial<UserProfile> = {}
+): UserProfile => {
+  const sanitizedApiUser = sanitizeProfileSource(apiUser);
+  const fallbackEmail = coerceString(fallback.email);
   const emailCandidate =
-    (typeof apiUser?.email === 'string' && apiUser.email) ?? fallback.email ?? '';
+    coerceString(sanitizedApiUser.email) ?? fallbackEmail ?? '';
   const usernameCandidate =
-    (typeof apiUser?.name === 'string' && apiUser.name) ||
-    (typeof apiUser?.username === 'string' && apiUser.username) ||
-    fallback.username ||
-    emailCandidate ||
-    'Usuario';
+    coerceString(sanitizedApiUser.name) ??
+    coerceString(sanitizedApiUser.username) ??
+    coerceString(fallback.username) ??
+    (emailCandidate || 'Usuario');
 
   return {
     username: usernameCandidate,
     email: emailCandidate,
     height: normalizeNumber(
-      apiUser?.height,
+      sanitizedApiUser.height,
       fallback.height ?? DEFAULT_PROFILE_METRICS.height
     ),
     weight: normalizeNumber(
-      apiUser?.weight,
+      sanitizedApiUser.weight,
       fallback.weight ?? DEFAULT_PROFILE_METRICS.weight
     ),
-    age: normalizeNumber(apiUser?.age, fallback.age ?? DEFAULT_PROFILE_METRICS.age),
+    age: normalizeNumber(
+      sanitizedApiUser.age,
+      fallback.age ?? DEFAULT_PROFILE_METRICS.age
+    ),
   };
 };
 
@@ -231,7 +264,7 @@ const parseApiPayload = (text: string) => {
   }
 };
 
-const apiFetch = async <T>(endpoint: string, options: ApiFetchOptions = {}) => {
+const apiFetch = async <T,>(endpoint: string, options: ApiFetchOptions = {}) => {
   const { skipAuth, headers: customHeaders, ...init } = options;
   let token: string | null = null;
 
@@ -384,6 +417,21 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(false);
 
   const nextNotificationId = useRef(1);
+
+  const persistAuthSession = useCallback(
+    async (authToken: string, profile: UserProfile) => {
+      await AsyncStorage.multiSet([
+        [AUTH_TOKEN_KEY, authToken],
+        [AUTH_USER_KEY, JSON.stringify(profile)],
+      ]);
+      setToken(authToken);
+    },
+    []
+  );
+
+  const clearPersistedSession = useCallback(async () => {
+    await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, AUTH_USER_KEY]);
+  }, []);
 
   const recomputeDailySnapshot = useCallback(
     (nextHabits: Record<HabitSlug, HabitState>) => {
@@ -634,7 +682,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   }, [syncHabitSummaries]);
 
   const request = useCallback(
-    async <T>(endpoint: string, options: ApiFetchOptions = {}) => {
+    async <T,>(endpoint: string, options: ApiFetchOptions = {}) => {
       const result = await apiFetch<T>(endpoint, options);
 
       if (endpoint.startsWith('/dashboard')) {
@@ -865,10 +913,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           throw new Error('No se recibió el token de autenticación.');
         }
 
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, authToken);
-        setToken(authToken);
-
-        const profile = buildUserProfile(data?.user, {
+        const profile = buildUserProfile(sanitizeProfileSource(data?.user), {
           username: username.trim(),
           email: normalizedEmail,
           height,
@@ -876,16 +921,15 @@ export function AppProvider({ children }: PropsWithChildren) {
           age,
         });
 
+        await persistAuthSession(authToken, profile);
         initializeUserSession(profile, {
           welcomeTitle: '👋 ¡Bienvenido!',
           welcomeMessage:
             'Configura tus hábitos para recibir recordatorios personalizados.',
         });
         await fetchAndSyncDashboardHabits();
-        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        await clearPersistedSession();
         setToken(null);
         throw error instanceof Error
           ? error
@@ -894,7 +938,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         setIsLoading(false);
       }
     },
-    [fetchAndSyncDashboardHabits, initializeUserSession]
+    [
+      clearPersistedSession,
+      fetchAndSyncDashboardHabits,
+      initializeUserSession,
+      persistAuthSession,
+    ]
   );
 
   const authenticate = useCallback<AppContextValue['authenticate']>(
@@ -921,22 +970,18 @@ export function AppProvider({ children }: PropsWithChildren) {
           throw new Error('No se recibió el token de autenticación.');
         }
 
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, authToken);
-        setToken(authToken);
-
-        const profile = buildUserProfile(data?.user, {
+        const profile = buildUserProfile(sanitizeProfileSource(data?.user), {
           email: normalizedEmail,
         });
 
+        await persistAuthSession(authToken, profile);
         initializeUserSession(profile, {
           welcomeTitle: '👋 ¡Bienvenido de nuevo!',
           welcomeMessage: 'Revisa tus hábitos para continuar con tu progreso.',
         });
         await fetchAndSyncDashboardHabits();
-        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        await clearPersistedSession();
         setToken(null);
         throw error instanceof Error
           ? error
@@ -945,7 +990,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         setIsLoading(false);
       }
     },
-    [fetchAndSyncDashboardHabits, initializeUserSession]
+    [
+      clearPersistedSession,
+      fetchAndSyncDashboardHabits,
+      initializeUserSession,
+      persistAuthSession,
+    ]
   );
 
   const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
@@ -964,7 +1014,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setToken(storedToken);
 
       const data = await apiFetch<{ user?: unknown }>('/auth/me');
-      const profile = buildUserProfile(data?.user ?? data);
+      const profile = buildUserProfile(sanitizeProfileSource(data?.user ?? data));
 
       initializeUserSession(profile);
       await fetchAndSyncDashboardHabits();
@@ -973,8 +1023,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       const status = (error as { status?: number }).status;
       if (status === 401 || status === 403) {
         forcedSignOut = true;
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        await clearPersistedSession();
         setToken(null);
         resetAppState();
         return;
@@ -984,8 +1033,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         const cachedProfile = await AsyncStorage.getItem(AUTH_USER_KEY);
         if (cachedProfile) {
           try {
-            const parsedProfile = JSON.parse(cachedProfile) as Partial<UserProfile>;
-            const sanitizedProfile = buildUserProfile(parsedProfile, parsedProfile);
+            const parsedProfile = JSON.parse(cachedProfile);
+            const sanitizedSource = sanitizeProfileSource(parsedProfile);
+            const sanitizedProfile = buildUserProfile(
+              sanitizedSource,
+              sanitizedSource as Partial<UserProfile>
+            );
             initializeUserSession(sanitizedProfile);
             return;
           } catch {
@@ -1000,7 +1053,12 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoading(false);
     }
-  }, [fetchAndSyncDashboardHabits, initializeUserSession, resetAppState]);
+  }, [
+    clearPersistedSession,
+    fetchAndSyncDashboardHabits,
+    initializeUserSession,
+    resetAppState,
+  ]);
 
   useEffect(() => {
     loadSession();
@@ -1008,13 +1066,12 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const signOut = useCallback<AppContextValue['signOut']>(async () => {
     try {
-      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-      await AsyncStorage.removeItem(AUTH_USER_KEY);
+      await clearPersistedSession();
     } finally {
       setToken(null);
       resetAppState();
     }
-  }, [resetAppState]);
+  }, [clearPersistedSession, resetAppState]);
 
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     async (updates) => {
@@ -1062,7 +1119,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         body: JSON.stringify(apiPayload),
       });
 
-      const nextProfile = buildUserProfile(data?.user ?? data, {
+      const nextProfile = buildUserProfile(sanitizeProfileSource(data?.user ?? data), {
         ...user,
         ...updates,
       });
