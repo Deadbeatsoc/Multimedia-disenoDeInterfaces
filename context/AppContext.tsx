@@ -156,7 +156,6 @@ const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): Us
   return {
     username: usernameCandidate,
     email: emailCandidate,
-    password: fallback.password ?? '',
     height: normalizeNumber(
       apiUser?.height,
       fallback.height ?? DEFAULT_PROFILE_METRICS.height
@@ -804,7 +803,6 @@ export function AppProvider({ children }: PropsWithChildren) {
         const profile = buildUserProfile(data?.user, {
           username: username.trim(),
           email: normalizedEmail,
-          password,
           height,
           weight,
           age,
@@ -860,7 +858,6 @@ export function AppProvider({ children }: PropsWithChildren) {
 
         const profile = buildUserProfile(data?.user, {
           email: normalizedEmail,
-          password,
         });
 
         initializeUserSession(profile, {
@@ -919,8 +916,9 @@ export function AppProvider({ children }: PropsWithChildren) {
         const cachedProfile = await AsyncStorage.getItem(AUTH_USER_KEY);
         if (cachedProfile) {
           try {
-            const parsedProfile = JSON.parse(cachedProfile) as UserProfile;
-            initializeUserSession(parsedProfile);
+            const parsedProfile = JSON.parse(cachedProfile) as Partial<UserProfile>;
+            const sanitizedProfile = buildUserProfile(parsedProfile, parsedProfile);
+            initializeUserSession(sanitizedProfile);
             return;
           } catch {
             await AsyncStorage.removeItem(AUTH_USER_KEY);
