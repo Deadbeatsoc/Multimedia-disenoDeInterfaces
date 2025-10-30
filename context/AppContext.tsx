@@ -9,7 +9,15 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
+import {
+  ApiRequestOptions,
+  apiFetch,
+  clearStoredToken,
+  extractUserIdFromToken,
+  getStoredToken,
+  setStoredToken,
+} from '@/services/httpClient';
+import { fetchDashboard, logHabitEntry as logHabitEntryRequest } from '@/services/api';
 import {
   DashboardResponse,
   HabitLog,
@@ -82,7 +90,7 @@ interface AppContextValue {
   updateExerciseSettings: (updates: Partial<ExerciseHabitSettings>) => Promise<void>;
   markNotificationAsRead: (notificationId: number) => Promise<void>;
   refreshReminders: () => void;
-  request: <T>(endpoint: string, options?: ApiFetchOptions) => Promise<T>;
+  request: <T>(endpoint: string, options?: ApiRequestOptions) => Promise<T>;
 }
 
 const HABIT_UNITS: Record<HabitSlug, string> = {
@@ -119,18 +127,8 @@ const defaultMeals: NutritionMealConfig[] = [
   { id: 'dinner', label: 'Cena', time: '20:00', enabled: true },
 ];
 
-const AUTH_TOKEN_KEY = 'auth_token';
 const AUTH_USER_KEY = 'auth_user';
 const DEFAULT_WATER_TARGET = 2000;
-
-const resolveApiUrl = () => {
-  const extra =
-    Constants?.expoConfig?.extra ??
-    ((Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra ?? {});
-  return (extra?.apiUrl as string | undefined) ?? process.env.EXPO_PUBLIC_API_URL ?? '';
-};
-
-const API_URL = resolveApiUrl();
 
 const normalizeNumber = (value: unknown, fallback: number) => {
   const parsed = typeof value === 'string' ? Number(value) : value;
@@ -144,6 +142,29 @@ const DEFAULT_PROFILE_METRICS: Pick<UserProfile, 'height' | 'weight' | 'age'> = 
 };
 
 const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): UserProfile => {
+  const idCandidate = (() => {
+    const idValue = apiUser?.id ?? apiUser?.userId;
+    if (typeof idValue === 'number' && Number.isFinite(idValue)) {
+      const normalized = Math.trunc(idValue);
+      return normalized > 0 ? normalized : null;
+    }
+
+    if (typeof idValue === 'string') {
+      const parsed = Number(idValue);
+      if (Number.isFinite(parsed)) {
+        const normalized = Math.trunc(parsed);
+        return normalized > 0 ? normalized : null;
+      }
+    }
+
+    if (typeof fallback.id === 'number' && Number.isFinite(fallback.id)) {
+      const normalized = Math.trunc(fallback.id);
+      return normalized > 0 ? normalized : null;
+    }
+
+    return fallback.id ?? null;
+  })();
+
   const emailCandidate =
     (typeof apiUser?.email === 'string' && apiUser.email) ?? fallback.email ?? '';
   const usernameCandidate =
@@ -154,6 +175,7 @@ const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): Us
     'Usuario';
 
   return {
+    id: idCandidate ?? null,
     username: usernameCandidate,
     email: emailCandidate,
     height: normalizeNumber(
@@ -199,66 +221,6 @@ const getHabitIdFromMap = (
 ): number | null => {
   const identifier = habitMap[slug]?.summary.id;
   return isValidHabitId(identifier) ? identifier : null;
-};
-
-type ApiFetchOptions = RequestInit & { skipAuth?: boolean };
-
-const parseApiPayload = (text: string) => {
-  if (!text) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
-
-const apiFetch = async <T>(endpoint: string, options: ApiFetchOptions = {}) => {
-  const { skipAuth, headers: customHeaders, ...init } = options;
-  let token: string | null = null;
-
-  if (!skipAuth) {
-    token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-  }
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-
-  if (customHeaders) {
-    if (customHeaders instanceof Headers) {
-      customHeaders.forEach((value, key) => {
-        headers[key] = value;
-      });
-    } else {
-      Object.assign(headers, customHeaders as Record<string, string>);
-    }
-  }
-
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    ...init,
-    headers,
-  });
-
-  const text = await response.text();
-  const payload = parseApiPayload(text);
-
-  if (!response.ok) {
-    const message =
-      (payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
-        ? payload.message
-        : undefined) || (typeof payload === 'string' && payload) ||
-      'No se pudo completar la solicitud. Inténtalo de nuevo más tarde.';
-    const error = new Error(message) as Error & { status?: number; payload?: unknown };
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
-
-  return payload as T;
 };
 
 const formatProgressText = (value: number, target: number, unit: string) => {
@@ -560,7 +522,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const fetchAndSyncDashboardHabits = useCallback(async () => {
     try {
-      const dashboardData = await apiFetch<DashboardResponse>('/dashboard');
+      const dashboardData = await fetchDashboard();
       if (dashboardData && Array.isArray(dashboardData.habits)) {
         syncHabitSummaries(dashboardData.habits);
       }
@@ -570,7 +532,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   }, [syncHabitSummaries]);
 
   const request = useCallback(
-    async <T>(endpoint: string, options: ApiFetchOptions = {}) => {
+    async <T>(endpoint: string, options: ApiRequestOptions = {}) => {
       const result = await apiFetch<T>(endpoint, options);
 
       if (endpoint.startsWith('/dashboard')) {
@@ -671,13 +633,10 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
       const timestamp = new Date().toISOString();
 
-      const data = await apiFetch<HabitLog>(`/habits/${habitId}/logs`, {
-        method: 'POST',
-        body: JSON.stringify({
-          value,
-          notes: notes ?? null,
-          loggedAt: timestamp,
-        }),
+      const data = await logHabitEntryRequest(habitId, {
+        value,
+        notes: notes ?? null,
+        loggedAt: timestamp,
       });
 
       const log: HabitLog = {
@@ -797,10 +756,11 @@ export function AppProvider({ children }: PropsWithChildren) {
           throw new Error('No se recibió el token de autenticación.');
         }
 
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, authToken);
+        await setStoredToken(authToken);
         setToken(authToken);
 
         const profile = buildUserProfile(data?.user, {
+          id: extractUserIdFromToken(authToken) ?? null,
           username: username.trim(),
           email: normalizedEmail,
           height,
@@ -816,7 +776,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         await fetchAndSyncDashboardHabits();
         await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await clearStoredToken();
         await AsyncStorage.removeItem(AUTH_USER_KEY);
         setToken(null);
         throw error instanceof Error
@@ -853,10 +813,11 @@ export function AppProvider({ children }: PropsWithChildren) {
           throw new Error('No se recibió el token de autenticación.');
         }
 
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, authToken);
+        await setStoredToken(authToken);
         setToken(authToken);
 
         const profile = buildUserProfile(data?.user, {
+          id: extractUserIdFromToken(authToken) ?? null,
           email: normalizedEmail,
         });
 
@@ -867,7 +828,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         await fetchAndSyncDashboardHabits();
         await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await clearStoredToken();
         await AsyncStorage.removeItem(AUTH_USER_KEY);
         setToken(null);
         throw error instanceof Error
@@ -886,7 +847,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     let forcedSignOut = false;
 
     try {
-      storedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+      storedToken = await getStoredToken();
       if (!storedToken) {
         setToken(null);
         resetAppState();
@@ -895,8 +856,19 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       setToken(storedToken);
 
+      const decodedUserId = extractUserIdFromToken(storedToken);
       const data = await apiFetch<{ user?: unknown }>('/auth/me');
-      const profile = buildUserProfile(data?.user ?? data);
+      const profile = buildUserProfile(data?.user ?? data, {
+        id: decodedUserId ?? null,
+      });
+
+      if (decodedUserId && profile.id && decodedUserId !== profile.id) {
+        const mismatchError = new Error('Token y perfil no coinciden') as Error & {
+          status?: number;
+        };
+        mismatchError.status = 401;
+        throw mismatchError;
+      }
 
       initializeUserSession(profile);
       await fetchAndSyncDashboardHabits();
@@ -905,7 +877,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       const status = (error as { status?: number }).status;
       if (status === 401 || status === 403) {
         forcedSignOut = true;
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await clearStoredToken();
         await AsyncStorage.removeItem(AUTH_USER_KEY);
         setToken(null);
         resetAppState();
@@ -940,7 +912,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const signOut = useCallback<AppContextValue['signOut']>(async () => {
     try {
-      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+      await clearStoredToken();
       await AsyncStorage.removeItem(AUTH_USER_KEY);
     } finally {
       setToken(null);
