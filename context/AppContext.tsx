@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ApiRequestOptions,
@@ -57,7 +58,12 @@ interface DashboardState {
   dailySnapshots: Record<string, DailySnapshot>;
 }
 
-interface SignInPayload {
+interface SignInCredentials {
+  email: string;
+  password: string;
+}
+
+interface RegisterPayload {
   username: string;
   email: string;
   password: string;
@@ -66,17 +72,12 @@ interface SignInPayload {
   age: number;
 }
 
-interface SignInCredentials {
-  email: string;
-  password: string;
-}
-
 interface AppContextValue {
   user: UserProfile | null;
   token: string | null;
   dashboard: DashboardState;
   isLoading: boolean;
-  signIn: (payload: SignInPayload) => Promise<void>;
+  signIn: (credentials: SignInCredentials) => Promise<void>;
   authenticate: (credentials: SignInCredentials) => Promise<void>;
   signOut: () => Promise<void>;
   loadSession: () => Promise<void>;
@@ -127,6 +128,7 @@ const defaultMeals: NutritionMealConfig[] = [
   { id: 'dinner', label: 'Cena', time: '20:00', enabled: true },
 ];
 
+const AUTH_TOKEN_KEY = 'auth_token';
 const AUTH_USER_KEY = 'auth_user';
 const DEFAULT_WATER_TARGET = 2000;
 
@@ -142,53 +144,28 @@ const DEFAULT_PROFILE_METRICS: Pick<UserProfile, 'height' | 'weight' | 'age'> = 
 };
 
 const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): UserProfile => {
-  const idCandidate = (() => {
-    const idValue = apiUser?.id ?? apiUser?.userId;
-    if (typeof idValue === 'number' && Number.isFinite(idValue)) {
-      const normalized = Math.trunc(idValue);
-      return normalized > 0 ? normalized : null;
-    }
+  const idRaw = apiUser?.id ?? apiUser?.userId ?? fallback.id ?? null;
+  const idCandidate =
+    typeof idRaw === 'number'
+      ? (Number.isFinite(idRaw) && idRaw > 0 ? Math.trunc(idRaw) : null)
+      : typeof idRaw === 'string'
+      ? (Number.isFinite(Number(idRaw)) && Number(idRaw) > 0 ? Math.trunc(Number(idRaw)) : null)
+      : null;
 
-    if (typeof idValue === 'string') {
-      const parsed = Number(idValue);
-      if (Number.isFinite(parsed)) {
-        const normalized = Math.trunc(parsed);
-        return normalized > 0 ? normalized : null;
-      }
-    }
-
-    if (typeof fallback.id === 'number' && Number.isFinite(fallback.id)) {
-      const normalized = Math.trunc(fallback.id);
-      return normalized > 0 ? normalized : null;
-    }
-
-    return fallback.id ?? null;
-  })();
-
-  const emailCandidate =
-    coerceString(sanitizedApiUser.email) ?? fallbackEmail ?? '';
+  const emailCandidate = String(apiUser?.email ?? fallback.email ?? '');
   const usernameCandidate =
-    coerceString(sanitizedApiUser.name) ??
-    coerceString(sanitizedApiUser.username) ??
-    coerceString(fallback.username) ??
+    apiUser?.name ??
+    apiUser?.username ??
+    fallback.username ??
     (emailCandidate || 'Usuario');
 
   return {
-    id: idCandidate ?? null,
+    id: idCandidate,
     username: usernameCandidate,
     email: emailCandidate,
-    height: normalizeNumber(
-      sanitizedApiUser.height,
-      fallback.height ?? DEFAULT_PROFILE_METRICS.height
-    ),
-    weight: normalizeNumber(
-      sanitizedApiUser.weight,
-      fallback.weight ?? DEFAULT_PROFILE_METRICS.weight
-    ),
-    age: normalizeNumber(
-      sanitizedApiUser.age,
-      fallback.age ?? DEFAULT_PROFILE_METRICS.age
-    ),
+    height: normalizeNumber(apiUser?.height, fallback.height ?? DEFAULT_PROFILE_METRICS.height),
+    weight: normalizeNumber(apiUser?.weight, fallback.weight ?? DEFAULT_PROFILE_METRICS.weight),
+    age: normalizeNumber(apiUser?.age, fallback.age ?? DEFAULT_PROFILE_METRICS.age),
   };
 };
 
@@ -330,7 +307,7 @@ const resolveTargetFromSettings = (slug: HabitSlug, settings: HabitSettingsMap):
     case 'exercise':
       return settings.exercise.dailyGoalMinutes;
     case 'nutrition':
-      return settings.nutrition.meals.filter((meal) => meal.enabled).length || 3;
+      return settings.nutrition.meals.filter((meal: NutritionMealConfig) => meal.enabled).length || 3;
     default:
       return 0;
   }
@@ -359,17 +336,16 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const persistAuthSession = useCallback(
     async (authToken: string, profile: UserProfile) => {
-      await AsyncStorage.multiSet([
-        [AUTH_TOKEN_KEY, authToken],
-        [AUTH_USER_KEY, JSON.stringify(profile)],
-      ]);
+      await setStoredToken(authToken);
+      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       setToken(authToken);
     },
     []
   );
 
   const clearPersistedSession = useCallback(async () => {
-    await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, AUTH_USER_KEY]);
+    await clearStoredToken();
+    await AsyncStorage.removeItem(AUTH_USER_KEY);
   }, []);
 
   const recomputeDailySnapshot = useCallback(
@@ -438,8 +414,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       const nutritionSettings = localSettings.nutrition;
       if (nutritionSettings.remindersEnabled) {
         nutritionSettings.meals
-          .filter((meal) => meal.enabled)
-          .forEach((meal) => {
+          .filter((meal: NutritionMealConfig) => meal.enabled)
+          .forEach((meal: NutritionMealConfig) => {
             const [hour, minute] = meal.time.split(':').map(Number);
             const reminderTime = setTimeOfDay(new Date(), hour, minute);
             pushReminder('nutrition', `🍽️ ${meal.label}`, `Es momento de tu ${meal.label.toLowerCase()}.`, reminderTime);
@@ -621,20 +597,19 @@ export function AppProvider({ children }: PropsWithChildren) {
   }, [syncHabitSummaries]);
 
   const request = useCallback(
-    async <T>(endpoint: string, options: ApiRequestOptions = {}) => {
-      const result = await apiFetch<T>(endpoint, options);
-
-      if (endpoint.startsWith('/dashboard')) {
-        const dashboardPayload = result as unknown as DashboardResponse | null;
-        if (dashboardPayload && Array.isArray(dashboardPayload.habits)) {
-          syncHabitSummaries(dashboardPayload.habits);
+    <T,>(endpoint: string, options: ApiRequestOptions = {}): Promise<T> => {
+      return apiFetch<T>(endpoint, options).then((result: T) => {
+        if (endpoint.startsWith('/api/dashboard')) {
+          const dashboardPayload = result as unknown as DashboardResponse | null;
+          if (dashboardPayload && Array.isArray(dashboardPayload.habits)) {
+            syncHabitSummaries(dashboardPayload.habits);
+          }
         }
-      }
-
-      return result;
+        return result;
+      });
     },
     [syncHabitSummaries]
-  );
+  ) as <T>(endpoint: string, options?: ApiRequestOptions) => Promise<T>;
 
   const registerAchievementNotification = useCallback(
     (slug: HabitSlug, message: string) => {
@@ -726,7 +701,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
       const timestamp = new Date().toISOString();
 
-      const data = await logHabitEntryRequest(habitId, {
+      const data = await logHabitEntryRequest(habitIdCandidate, {
         value,
         notes: notes ?? null,
         loggedAt: timestamp,
@@ -822,91 +797,24 @@ export function AppProvider({ children }: PropsWithChildren) {
   );
 
   const signIn = useCallback<AppContextValue['signIn']>(
-    async ({ username, email, password, height, weight, age }) => {
+    async ({ email, password }) => {
       setIsLoading(true);
       const normalizedEmail = email.trim().toLowerCase();
 
       try {
-        const data = await apiFetch<{ token?: string; user?: unknown }>(
-          '/auth/register',
+        const data = await apiFetch<{ token?: string; user?: any }>(
+          '/api/auth/login',
           {
             method: 'POST',
             body: JSON.stringify({
-              name: username.trim(),
               email: normalizedEmail,
               password,
-              height,
-              weight,
-              age,
             }),
             skipAuth: true,
           }
         );
 
         const authToken = data?.token;
-
-        if (!authToken) {
-          throw new Error('No se recibió el token de autenticación.');
-        }
-
-        await setStoredToken(authToken);
-        setToken(authToken);
-
-        const profile = buildUserProfile(data?.user, {
-          id: extractUserIdFromToken(authToken) ?? null,
-          username: username.trim(),
-          email: normalizedEmail,
-          height,
-          weight,
-          age,
-        });
-
-        await persistAuthSession(authToken, profile);
-        initializeUserSession(profile, {
-          welcomeTitle: '👋 ¡Bienvenido!',
-          welcomeMessage:
-            'Configura tus hábitos para recibir recordatorios personalizados.',
-        });
-        await fetchAndSyncDashboardHabits();
-      } catch (error) {
-        await clearStoredToken();
-        await AsyncStorage.removeItem(AUTH_USER_KEY);
-        setToken(null);
-        throw error instanceof Error
-          ? error
-          : new Error('No pudimos crear tu perfil. Intenta nuevamente.');
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [
-      clearPersistedSession,
-      fetchAndSyncDashboardHabits,
-      initializeUserSession,
-      persistAuthSession,
-    ]
-  );
-
-  const authenticate = useCallback<AppContextValue['authenticate']>(
-    async ({ email, password }) => {
-      setIsLoading(true);
-      const normalizedEmail = email.trim().toLowerCase();
-
-      try {
-        const data = await apiFetch<{ token?: string; user?: unknown }>(
-          '/auth/login',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              email: normalizedEmail,
-              password,
-            }),
-            skipAuth: true,
-          }
-        );
-
-        const authToken: string | undefined = data?.token;
-
         if (!authToken) {
           throw new Error('No se recibió el token de autenticación.');
         }
@@ -919,29 +827,36 @@ export function AppProvider({ children }: PropsWithChildren) {
           email: normalizedEmail,
         });
 
+        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
         await persistAuthSession(authToken, profile);
+
         initializeUserSession(profile, {
           welcomeTitle: '👋 ¡Bienvenido de nuevo!',
-          welcomeMessage: 'Revisa tus hábitos para continuar con tu progreso.',
+          welcomeMessage: 'Tus hábitos te esperan.',
         });
+
         await fetchAndSyncDashboardHabits();
       } catch (error) {
         await clearStoredToken();
         await AsyncStorage.removeItem(AUTH_USER_KEY);
         setToken(null);
+
         throw error instanceof Error
           ? error
-          : new Error('No pudimos validar tus credenciales. Intenta nuevamente.');
+          : new Error('No pudimos iniciar tu sesión. Intenta nuevamente.');
       } finally {
         setIsLoading(false);
       }
     },
-    [
-      clearPersistedSession,
-      fetchAndSyncDashboardHabits,
-      initializeUserSession,
-      persistAuthSession,
-    ]
+    [fetchAndSyncDashboardHabits, initializeUserSession, persistAuthSession]
+  );
+
+
+  const authenticate = useCallback<AppContextValue['authenticate']>(
+    (credentials: { email: string; password: string }) => {
+      return signIn(credentials);
+    },
+    [signIn]
   );
 
   const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
@@ -960,7 +875,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setToken(storedToken);
 
       const decodedUserId = extractUserIdFromToken(storedToken);
-      const data = await apiFetch<{ user?: unknown }>('/auth/me');
+      const data = await apiFetch<{ user?: unknown }>('/api/auth/me');
       const profile = buildUserProfile(data?.user ?? data, {
         id: decodedUserId ?? null,
       });
@@ -984,6 +899,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         await AsyncStorage.removeItem(AUTH_USER_KEY);
         setToken(null);
         resetAppState();
+        router.replace('/');
         return;
       }
 
@@ -992,10 +908,9 @@ export function AppProvider({ children }: PropsWithChildren) {
         if (cachedProfile) {
           try {
             const parsedProfile = JSON.parse(cachedProfile);
-            const sanitizedSource = sanitizeProfileSource(parsedProfile);
             const sanitizedProfile = buildUserProfile(
-              sanitizedSource,
-              sanitizedSource as Partial<UserProfile>
+              parsedProfile,
+              parsedProfile as Partial<UserProfile>
             );
             initializeUserSession(sanitizedProfile);
             return;
@@ -1012,7 +927,6 @@ export function AppProvider({ children }: PropsWithChildren) {
       setIsLoading(false);
     }
   }, [
-    clearPersistedSession,
     fetchAndSyncDashboardHabits,
     initializeUserSession,
     resetAppState,
@@ -1029,8 +943,9 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setToken(null);
       resetAppState();
+      router.replace('/');
     }
-  }, [clearPersistedSession, resetAppState]);
+  }, [resetAppState]);
 
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     async (updates) => {
@@ -1073,12 +988,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         return user as UserProfile;
       }
 
-      const data = await apiFetch<{ user?: unknown }>('/auth/me', {
+      const data = await apiFetch<{ user?: unknown }>('/api/auth/me', {
         method: 'PATCH',
         body: JSON.stringify(apiPayload),
       });
 
-      const nextProfile = buildUserProfile(sanitizeProfileSource(data?.user ?? data), {
+      const nextProfile = buildUserProfile(data?.user ?? data, {
         ...user,
         ...updates,
       });
@@ -1135,7 +1050,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           useRecommendedTarget: boolean;
           reminderInterval: number;
         };
-      }>('/habits/settings', {
+      }>('/api/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });
@@ -1182,7 +1097,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           reminderAdvance: number;
           targetValue?: number;
         };
-      }>('/habits/settings', {
+      }>('/api/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });
@@ -1206,7 +1121,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const updateNutritionSettings = useCallback<AppContextValue['updateNutritionSettings']>(
     async (nutritionUpdates) => {
-      const meals = (nutritionUpdates.meals ?? settings.nutrition.meals).map((meal) => ({
+      const meals = (nutritionUpdates.meals ?? settings.nutrition.meals).map((meal: NutritionMealConfig) => ({
         id: meal.id,
         label: meal.label,
         time: meal.time,
@@ -1220,7 +1135,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           meals: { id: string; label: string; time: string; enabled: boolean }[];
           targetValue: number;
         };
-      }>('/habits/settings', {
+      }>('/api/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify({
           type: 'nutrition',
@@ -1230,7 +1145,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         }),
       });
 
-      const updatedMeals = response.settings.meals.map((meal) => ({
+      const updatedMeals = response.settings.meals.map((meal: any) => ({
         id: meal.id,
         label: meal.label,
         time: meal.time,
@@ -1258,7 +1173,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         ...settings,
         nutrition: {
           ...settings.nutrition,
-          meals: settings.nutrition.meals.map((meal) =>
+          meals: settings.nutrition.meals.map((meal: NutritionMealConfig) =>
             meal.id === mealId ? { ...meal, ...mealUpdates } : meal
           ),
         },
@@ -1285,7 +1200,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           reminderTime: string;
           dailyGoalMinutes: number;
         };
-      }>('/habits/settings', {
+      }>('/api/habits/settings', {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });
@@ -1313,7 +1228,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const markNotificationAsRead = useCallback<AppContextValue['markNotificationAsRead']>(
     async (notificationId) => {
-      await apiFetch(`/notifications/${notificationId}/read`, {
+      await apiFetch(`/api/notifications/${notificationId}/read`, {
         method: 'PATCH',
       });
 
