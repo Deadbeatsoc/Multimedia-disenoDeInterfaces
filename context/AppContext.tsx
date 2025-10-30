@@ -166,50 +166,76 @@ const buildUserProfile = (apiUser: any, fallback: Partial<UserProfile> = {}): Us
   })();
 
   const emailCandidate =
-    (typeof apiUser?.email === 'string' && apiUser.email) ?? fallback.email ?? '';
+    coerceString(sanitizedApiUser.email) ?? fallbackEmail ?? '';
   const usernameCandidate =
-    (typeof apiUser?.name === 'string' && apiUser.name) ||
-    (typeof apiUser?.username === 'string' && apiUser.username) ||
-    fallback.username ||
-    emailCandidate ||
-    'Usuario';
+    coerceString(sanitizedApiUser.name) ??
+    coerceString(sanitizedApiUser.username) ??
+    coerceString(fallback.username) ??
+    (emailCandidate || 'Usuario');
 
   return {
     id: idCandidate ?? null,
     username: usernameCandidate,
     email: emailCandidate,
     height: normalizeNumber(
-      apiUser?.height,
+      sanitizedApiUser.height,
       fallback.height ?? DEFAULT_PROFILE_METRICS.height
     ),
     weight: normalizeNumber(
-      apiUser?.weight,
+      sanitizedApiUser.weight,
       fallback.weight ?? DEFAULT_PROFILE_METRICS.weight
     ),
-    age: normalizeNumber(apiUser?.age, fallback.age ?? DEFAULT_PROFILE_METRICS.age),
+    age: normalizeNumber(
+      sanitizedApiUser.age,
+      fallback.age ?? DEFAULT_PROFILE_METRICS.age
+    ),
   };
 };
 
+const createDefaultHabitIdentifiers = (): Record<HabitSlug, number | null> => ({
+  water: null,
+  sleep: null,
+  exercise: null,
+  nutrition: null,
+});
+
 const buildHabitStates = (
-  habitSettings: HabitSettingsMap
+  habitSettings: HabitSettingsMap,
+  identifiers: Record<HabitSlug, number | null>
 ): Record<HabitSlug, HabitState> => ({
   water: {
-    summary: createHabitSummary('water', resolveTargetFromSettings('water', habitSettings)),
+    summary: createHabitSummary(
+      'water',
+      resolveTargetFromSettings('water', habitSettings),
+      identifiers.water
+    ),
     history: [],
     settings: habitSettings.water,
   },
   sleep: {
-    summary: createHabitSummary('sleep', resolveTargetFromSettings('sleep', habitSettings)),
+    summary: createHabitSummary(
+      'sleep',
+      resolveTargetFromSettings('sleep', habitSettings),
+      identifiers.sleep
+    ),
     history: [],
     settings: habitSettings.sleep,
   },
   exercise: {
-    summary: createHabitSummary('exercise', resolveTargetFromSettings('exercise', habitSettings)),
+    summary: createHabitSummary(
+      'exercise',
+      resolveTargetFromSettings('exercise', habitSettings),
+      identifiers.exercise
+    ),
     history: [],
     settings: habitSettings.exercise,
   },
   nutrition: {
-    summary: createHabitSummary('nutrition', resolveTargetFromSettings('nutrition', habitSettings)),
+    summary: createHabitSummary(
+      'nutrition',
+      resolveTargetFromSettings('nutrition', habitSettings),
+      identifiers.nutrition
+    ),
     history: [],
     settings: habitSettings.nutrition,
   },
@@ -236,8 +262,12 @@ const formatProgressText = (value: number, target: number, unit: string) => {
   return `${value} ${unit} de ${target} ${unit}`;
 };
 
-const createHabitSummary = (slug: HabitSlug, targetValue: number): HabitSummary => ({
-  id: 0,
+const createHabitSummary = (
+  slug: HabitSlug,
+  targetValue: number,
+  identifier?: number | null
+): HabitSummary => ({
+  id: isValidHabitId(identifier) ? identifier : 0,
   slug,
   name: HABIT_NAMES[slug],
   icon: HABIT_ICONS[slug],
@@ -313,8 +343,12 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [settings, setSettings] = useState<HabitSettingsMap>(initialSettingsRef.current);
+  const [habitIdentifiers, setHabitIdentifiers] = useState<Record<
+    HabitSlug,
+    number | null
+  >>(createDefaultHabitIdentifiers);
   const [habits, setHabits] = useState<Record<HabitSlug, HabitState>>(() =>
-    buildHabitStates(initialSettingsRef.current)
+    buildHabitStates(initialSettingsRef.current, createDefaultHabitIdentifiers())
   );
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -322,6 +356,21 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(false);
 
   const nextNotificationId = useRef(1);
+
+  const persistAuthSession = useCallback(
+    async (authToken: string, profile: UserProfile) => {
+      await AsyncStorage.multiSet([
+        [AUTH_TOKEN_KEY, authToken],
+        [AUTH_USER_KEY, JSON.stringify(profile)],
+      ]);
+      setToken(authToken);
+    },
+    []
+  );
+
+  const clearPersistedSession = useCallback(async () => {
+    await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, AUTH_USER_KEY]);
+  }, []);
 
   const recomputeDailySnapshot = useCallback(
     (nextHabits: Record<HabitSlug, HabitState>) => {
@@ -345,7 +394,11 @@ export function AppProvider({ children }: PropsWithChildren) {
   );
 
   const rebuildReminders = useCallback(
-    (nextHabits: Record<HabitSlug, HabitState>, localSettings: HabitSettingsMap) => {
+    (
+      nextHabits: Record<HabitSlug, HabitState>,
+      localSettings: HabitSettingsMap,
+      identifiers: Record<HabitSlug, number | null> = habitIdentifiers
+    ) => {
       const now = new Date();
       const items: ReminderItem[] = [];
 
@@ -357,7 +410,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       ) => {
         items.push({
           id: nextNotificationId.current++,
-          habitId: getHabitIdFromMap(nextHabits, slug),
+          habitId: identifiers[slug] ?? null,
           title,
           message,
           type: 'reminder',
@@ -402,7 +455,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       setReminders(items);
     },
-    []
+    [habitIdentifiers]
   );
 
   const syncHabitSummaries = useCallback(
@@ -412,10 +465,13 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
 
       let computedHabits: Record<HabitSlug, HabitState> | null = null;
+      let computedIdentifiers: Record<HabitSlug, number | null> | null = null;
 
       setHabits((prev) => {
         const next = { ...prev } as Record<HabitSlug, HabitState>;
         let hasUpdates = false;
+        let identifiersChanged = false;
+        const identifiersDraft = { ...habitIdentifiers };
 
         summaries.forEach((summary) => {
           const slug = summary?.slug as HabitSlug | undefined;
@@ -426,10 +482,17 @@ export function AppProvider({ children }: PropsWithChildren) {
           const current = next[slug];
           const nextTargetUnit =
             summary.targetUnit ?? current.summary.targetUnit ?? HABIT_UNITS[slug];
+          const apiIdentifier = isValidHabitId(summary.id) ? summary.id : null;
+
+          if (apiIdentifier !== null && identifiersDraft[slug] !== apiIdentifier) {
+            identifiersChanged = true;
+            identifiersDraft[slug] = apiIdentifier;
+          }
 
           const updatedSummary: HabitSummary = {
             ...current.summary,
             ...summary,
+            id: apiIdentifier ?? current.summary.id,
             slug,
             name: summary.name ?? current.summary.name ?? HABIT_NAMES[slug],
             icon: summary.icon ?? current.summary.icon ?? HABIT_ICONS[slug],
@@ -468,19 +531,32 @@ export function AppProvider({ children }: PropsWithChildren) {
         });
 
         if (!hasUpdates) {
+          if (identifiersChanged) {
+            computedIdentifiers = identifiersDraft;
+          }
           return prev;
         }
 
         computedHabits = next;
+        if (identifiersChanged) {
+          computedIdentifiers = identifiersDraft;
+        }
         return next;
       });
 
+      if (computedIdentifiers) {
+        setHabitIdentifiers(computedIdentifiers);
+      }
+
       if (computedHabits) {
+        const identifiers = computedIdentifiers ?? habitIdentifiers;
         recomputeDailySnapshot(computedHabits);
-        rebuildReminders(computedHabits, settings);
+        rebuildReminders(computedHabits, settings, identifiers);
+      } else if (computedIdentifiers) {
+        rebuildReminders(habits, settings, computedIdentifiers);
       }
     },
-    [rebuildReminders, recomputeDailySnapshot, settings]
+    [habitIdentifiers, habits, rebuildReminders, recomputeDailySnapshot, settings]
   );
 
   const updateHabitIdentifier = useCallback(
@@ -490,6 +566,16 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
 
       let computedHabits: Record<HabitSlug, HabitState> | null = null;
+      let updatedIdentifiers: Record<HabitSlug, number | null> | null = null;
+
+      setHabitIdentifiers((prev) => {
+        if (prev[slug] === identifier) {
+          return prev;
+        }
+        const next = { ...prev, [slug]: identifier };
+        updatedIdentifiers = next;
+        return next;
+      });
 
       setHabits((prev) => {
         const current = prev[slug];
@@ -512,12 +598,15 @@ export function AppProvider({ children }: PropsWithChildren) {
         return next;
       });
 
+      const identifiers = updatedIdentifiers ?? habitIdentifiers;
       if (computedHabits) {
         recomputeDailySnapshot(computedHabits);
-        rebuildReminders(computedHabits, settings);
+        rebuildReminders(computedHabits, settings, identifiers);
+      } else if (updatedIdentifiers) {
+        rebuildReminders(habits, settings, updatedIdentifiers);
       }
     },
-    [rebuildReminders, recomputeDailySnapshot, settings]
+    [habitIdentifiers, habits, rebuildReminders, recomputeDailySnapshot, settings]
   );
 
   const fetchAndSyncDashboardHabits = useCallback(async () => {
@@ -552,7 +641,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setNotifications((prev) => [
         {
           id: nextNotificationId.current++,
-          habitId: getHabitIdFromMap(habits, slug),
+          habitId: habitIdentifiers[slug] ?? null,
           title: '🎉 ¡Objetivo alcanzado!',
           message,
           type: 'achievement',
@@ -564,16 +653,18 @@ export function AppProvider({ children }: PropsWithChildren) {
         ...prev,
       ]);
     },
-    [habits]
+    [habitIdentifiers]
   );
 
   const resetAppState = useCallback(() => {
     const baseSettings = createDefaultSettings(DEFAULT_WATER_TARGET);
-    const baseHabits = buildHabitStates(baseSettings);
+    const baseIdentifiers = createDefaultHabitIdentifiers();
+    const baseHabits = buildHabitStates(baseSettings, baseIdentifiers);
 
     nextNotificationId.current = 1;
     setUser(null);
     setSettings(baseSettings);
+    setHabitIdentifiers(baseIdentifiers);
     setHabits(baseHabits);
     setDailySnapshots({});
     setReminders([]);
@@ -587,15 +678,17 @@ export function AppProvider({ children }: PropsWithChildren) {
     ) => {
       const recommended = computeRecommendedWater(profile.height, profile.weight);
       const nextSettings = createDefaultSettings(recommended);
-      const nextHabits = buildHabitStates(nextSettings);
+      const nextIdentifiers = createDefaultHabitIdentifiers();
+      const nextHabits = buildHabitStates(nextSettings, nextIdentifiers);
 
       nextNotificationId.current = 1;
 
       setUser(profile);
       setSettings(nextSettings);
+      setHabitIdentifiers(nextIdentifiers);
       setHabits(nextHabits);
       setDailySnapshots({});
-      rebuildReminders(nextHabits, nextSettings);
+      rebuildReminders(nextHabits, nextSettings, nextIdentifiers);
 
       if (welcome?.welcomeTitle && welcome?.welcomeMessage) {
         setNotifications([
@@ -625,8 +718,8 @@ export function AppProvider({ children }: PropsWithChildren) {
         throw new Error('No encontramos este hábito.');
       }
 
-      const habitId = habit.summary.id;
-      if (!isValidHabitId(habitId)) {
+      const habitIdCandidate = habitIdentifiers[slug] ?? habit.summary.id;
+      if (!isValidHabitId(habitIdCandidate)) {
         throw new Error(
           'No se pudo identificar este hábito. Actualiza la información e inténtalo nuevamente.'
         );
@@ -641,7 +734,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       const log: HabitLog = {
         ...data,
-        habitId,
+        habitId: habitIdCandidate,
         notes: data?.notes ?? notes ?? null,
         loggedAt: data?.loggedAt ?? timestamp,
         entryDate: data?.entryDate ?? toDateKey(new Date(data?.loggedAt ?? timestamp)),
@@ -691,7 +784,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       return log;
     },
-    [habits, recomputeDailySnapshot, registerAchievementNotification, settings]
+    [habitIdentifiers, habits, recomputeDailySnapshot, registerAchievementNotification, settings]
   );
 
   const applySettings = useCallback(
@@ -768,13 +861,13 @@ export function AppProvider({ children }: PropsWithChildren) {
           age,
         });
 
+        await persistAuthSession(authToken, profile);
         initializeUserSession(profile, {
           welcomeTitle: '👋 ¡Bienvenido!',
           welcomeMessage:
             'Configura tus hábitos para recibir recordatorios personalizados.',
         });
         await fetchAndSyncDashboardHabits();
-        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
         await clearStoredToken();
         await AsyncStorage.removeItem(AUTH_USER_KEY);
@@ -786,7 +879,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         setIsLoading(false);
       }
     },
-    [fetchAndSyncDashboardHabits, initializeUserSession]
+    [
+      clearPersistedSession,
+      fetchAndSyncDashboardHabits,
+      initializeUserSession,
+      persistAuthSession,
+    ]
   );
 
   const authenticate = useCallback<AppContextValue['authenticate']>(
@@ -821,12 +919,12 @@ export function AppProvider({ children }: PropsWithChildren) {
           email: normalizedEmail,
         });
 
+        await persistAuthSession(authToken, profile);
         initializeUserSession(profile, {
           welcomeTitle: '👋 ¡Bienvenido de nuevo!',
           welcomeMessage: 'Revisa tus hábitos para continuar con tu progreso.',
         });
         await fetchAndSyncDashboardHabits();
-        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
       } catch (error) {
         await clearStoredToken();
         await AsyncStorage.removeItem(AUTH_USER_KEY);
@@ -838,7 +936,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         setIsLoading(false);
       }
     },
-    [fetchAndSyncDashboardHabits, initializeUserSession]
+    [
+      clearPersistedSession,
+      fetchAndSyncDashboardHabits,
+      initializeUserSession,
+      persistAuthSession,
+    ]
   );
 
   const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
@@ -888,8 +991,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         const cachedProfile = await AsyncStorage.getItem(AUTH_USER_KEY);
         if (cachedProfile) {
           try {
-            const parsedProfile = JSON.parse(cachedProfile) as Partial<UserProfile>;
-            const sanitizedProfile = buildUserProfile(parsedProfile, parsedProfile);
+            const parsedProfile = JSON.parse(cachedProfile);
+            const sanitizedSource = sanitizeProfileSource(parsedProfile);
+            const sanitizedProfile = buildUserProfile(
+              sanitizedSource,
+              sanitizedSource as Partial<UserProfile>
+            );
             initializeUserSession(sanitizedProfile);
             return;
           } catch {
@@ -904,7 +1011,12 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoading(false);
     }
-  }, [fetchAndSyncDashboardHabits, initializeUserSession, resetAppState]);
+  }, [
+    clearPersistedSession,
+    fetchAndSyncDashboardHabits,
+    initializeUserSession,
+    resetAppState,
+  ]);
 
   useEffect(() => {
     loadSession();
@@ -918,7 +1030,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setToken(null);
       resetAppState();
     }
-  }, [resetAppState]);
+  }, [clearPersistedSession, resetAppState]);
 
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     async (updates) => {
@@ -966,7 +1078,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         body: JSON.stringify(apiPayload),
       });
 
-      const nextProfile = buildUserProfile(data?.user ?? data, {
+      const nextProfile = buildUserProfile(sanitizeProfileSource(data?.user ?? data), {
         ...user,
         ...updates,
       });
