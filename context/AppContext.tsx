@@ -335,6 +335,21 @@ export function AppProvider({ children }: PropsWithChildren) {
   const nextNotificationId = useRef(1);
   const loadSessionRef = useRef<AppContextValue['loadSession'] | null>(null);
 
+  const safeReplace = useCallback((href: string) => {
+    if (router && typeof router.replace === 'function') {
+      try {
+        router.replace(href);
+        return;
+      } catch (error) {
+        console.warn('Fallo al navegar con expo-router:', error);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.href = href;
+    }
+  }, []);
+
   const persistAuthSession = useCallback(
     async (authToken: string, profile: UserProfile) => {
       await setStoredToken(authToken);
@@ -877,6 +892,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           {
             method: 'POST',
             body: JSON.stringify({
+              name: normalizedUsername,
               username: normalizedUsername,
               email: normalizedEmail,
               password,
@@ -915,8 +931,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
         await fetchAndSyncDashboardHabits();
       } catch (error) {
-        await clearStoredToken();
-        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        await clearPersistedSession();
         setToken(null);
 
         throw error instanceof Error
@@ -926,7 +941,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         setIsLoading(false);
       }
     },
-    [fetchAndSyncDashboardHabits, initializeUserSession, persistAuthSession]
+    [clearPersistedSession, fetchAndSyncDashboardHabits, initializeUserSession, persistAuthSession]
   );
 
   const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
@@ -965,11 +980,10 @@ export function AppProvider({ children }: PropsWithChildren) {
       const status = (error as { status?: number }).status;
       if (status === 401 || status === 403) {
         forcedSignOut = true;
-        await clearStoredToken();
-        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        await clearPersistedSession();
         setToken(null);
         resetAppState();
-        router.replace('/');
+        safeReplace('/');
         return;
       }
 
@@ -996,7 +1010,13 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoading(false);
     }
-  }, [fetchAndSyncDashboardHabits, initializeUserSession, resetAppState]);
+  }, [
+    clearPersistedSession,
+    fetchAndSyncDashboardHabits,
+    initializeUserSession,
+    resetAppState,
+    safeReplace,
+  ]);
 
   useEffect(() => {
     loadSessionRef.current = loadSession;
@@ -1008,14 +1028,13 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const signOut = useCallback<AppContextValue['signOut']>(async () => {
     try {
-      await clearStoredToken();
-      await AsyncStorage.removeItem(AUTH_USER_KEY);
+      await clearPersistedSession();
     } finally {
       setToken(null);
       resetAppState();
-      router.replace('/');
+      safeReplace('/');
     }
-  }, [resetAppState]);
+  }, [clearPersistedSession, resetAppState, safeReplace]);
 
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     async (updates) => {
@@ -1089,9 +1108,11 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       applySettings(nextSettings);
 
+      await fetchAndSyncDashboardHabits();
+
       return nextProfile;
     },
-    [applySettings, settings, user]
+    [applySettings, fetchAndSyncDashboardHabits, settings, user]
   );
 
   const updateWaterSettings = useCallback<AppContextValue['updateWaterSettings']>(

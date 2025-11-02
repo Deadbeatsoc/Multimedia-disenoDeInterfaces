@@ -52,7 +52,8 @@ const toNumberOrNull = (value) => {
 
 const toPublicUser = (row) => ({
   id: row.id,
-  name: row.name,
+  name: row.name ?? row.username,
+  username: row.username ?? row.name,
   email: row.email,
   height: toIntegerOrNull(row.height ?? row.height_cm),
   weight: toIntegerOrNull(row.weight ?? row.weight_kg),
@@ -119,14 +120,19 @@ app.get('/api/health', (req, res) => {
 app.post(
   '/api/auth/register',
   asyncHandler(async (req, res) => {
-    const { name, email, password, height, weight, age } = req.body ?? {};
+    const { name, username, email, password, height, weight, age } = req.body ?? {};
 
-  if (!name || !email || !password || !height || !weight || !age) {
-    return res.status(400).json({ message: 'Todos los campos son obligatorios' });
-  }
+    const normalizedEmail = String(email ?? '').trim().toLowerCase();
+    const normalizedName = String(name ?? username ?? '').trim();
 
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const normalizedName = String(name).trim();
+    if (!normalizedName || !normalizedEmail || !password) {
+      return res.status(400).json({ message: 'Todos los campos son obligatorios' });
+    }
+
+    if (height === undefined || weight === undefined || age === undefined) {
+      return res.status(400).json({ message: 'Altura, peso y edad son obligatorios' });
+    }
+
     const numericHeight = height === undefined || height === null ? null : toIntegerOrNull(height);
     const numericWeight = weight === undefined || weight === null ? null : toIntegerOrNull(weight);
     const numericAge = age === undefined || age === null ? null : toIntegerOrNull(age);
