@@ -307,6 +307,16 @@ await client.query(
       });
     } catch (error) {
       await client.query('ROLLBACK');
+
+      const isDuplicateEmailError =
+        error?.code === '23505' || error?.constraint === 'users_email_key';
+
+      if (isDuplicateEmailError) {
+        return res
+          .status(409)
+          .json({ message: 'El correo ya está registrado' });
+      }
+
       console.error('Error al registrar usuario:', error);
       res.status(500).json({ message: 'No se pudo crear el usuario' });
     } finally {
