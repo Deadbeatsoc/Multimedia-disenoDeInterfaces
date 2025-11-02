@@ -18,6 +18,7 @@ export function useDashboardData(): UseDashboardDataResult {
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isSigningOut = useRef(false);
 
   const signingOutRef = useRef(false);
 
