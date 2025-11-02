@@ -17,7 +17,7 @@ import { colors, spacing } from '@/constants/theme';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { user, signIn, authenticate, isLoading } = useAppContext();
+  const { user, signIn, isLoading } = useAppContext();
   const [mode, setMode] = useState<'register' | 'login'>('register');
   const [step, setStep] = useState(1);
   const [username, setUsername] = useState('');
@@ -105,7 +105,7 @@ export default function LoginScreen() {
 
     try {
       setError(null);
-      await authenticate({ email: email.trim(), password });
+      await signIn({ email: email.trim(), password });
       router.replace('/(tabs)');
     } catch (err) {
       setError(

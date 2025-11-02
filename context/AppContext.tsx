@@ -78,7 +78,6 @@ interface AppContextValue {
   dashboard: DashboardState;
   isLoading: boolean;
   signIn: (credentials: SignInCredentials) => Promise<void>;
-  authenticate: (credentials: SignInCredentials) => Promise<void>;
   signOut: () => Promise<void>;
   loadSession: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<UserProfile>;
@@ -525,12 +524,15 @@ export function AppProvider({ children }: PropsWithChildren) {
         setHabitIdentifiers(computedIdentifiers);
       }
 
+      const finalIdentifiers = computedIdentifiers ?? habitIdentifiers;
+      const finalHabits = computedHabits ?? habits;
+
       if (computedHabits) {
-        const identifiers = computedIdentifiers ?? habitIdentifiers;
         recomputeDailySnapshot(computedHabits);
-        rebuildReminders(computedHabits, settings, identifiers);
-      } else if (computedIdentifiers) {
-        rebuildReminders(habits, settings, computedIdentifiers);
+      }
+
+      if (computedHabits || computedIdentifiers) {
+        rebuildReminders(finalHabits, settings, finalIdentifiers);
       }
     },
     [habitIdentifiers, habits, rebuildReminders, recomputeDailySnapshot, settings]
@@ -575,12 +577,15 @@ export function AppProvider({ children }: PropsWithChildren) {
         return next;
       });
 
-      const identifiers = updatedIdentifiers ?? habitIdentifiers;
+      const finalIdentifiers = updatedIdentifiers ?? habitIdentifiers;
+      const finalHabits = computedHabits ?? habits;
+
       if (computedHabits) {
         recomputeDailySnapshot(computedHabits);
-        rebuildReminders(computedHabits, settings, identifiers);
-      } else if (updatedIdentifiers) {
-        rebuildReminders(habits, settings, updatedIdentifiers);
+      }
+
+      if (computedHabits || updatedIdentifiers) {
+        rebuildReminders(finalHabits, settings, finalIdentifiers);
       }
     },
     [habitIdentifiers, habits, rebuildReminders, recomputeDailySnapshot, settings]
@@ -857,14 +862,6 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
     },
     [fetchAndSyncDashboardHabits, initializeUserSession, persistAuthSession]
-  );
-
-
-  const authenticate = useCallback<AppContextValue['authenticate']>(
-    (credentials: { email: string; password: string }) => {
-      return signIn(credentials);
-    },
-    [signIn]
   );
 
   const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
@@ -1288,7 +1285,6 @@ export function AppProvider({ children }: PropsWithChildren) {
       dashboard,
       isLoading,
       signIn,
-      authenticate,
       signOut,
       loadSession,
       updateProfile,
@@ -1313,7 +1309,6 @@ export function AppProvider({ children }: PropsWithChildren) {
       request,
       refreshReminders,
       signOut,
-      authenticate,
       signIn,
       updateExerciseSettings,
       updateMealTime,
