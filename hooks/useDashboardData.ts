@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { DashboardResponse, NotificationItem } from '@/types/api';
 
@@ -13,13 +12,13 @@ interface UseDashboardDataResult {
 }
 
 export function useDashboardData(): UseDashboardDataResult {
-  const router = useRouter();
   const { token, refreshReminders, signOut, request } = useAppContext();
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isSigningOut = useRef(false);
 
   const fetchDashboard = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -52,8 +51,19 @@ export function useDashboardData(): UseDashboardDataResult {
           setError('Tu sesión ha expirado. Vuelve a iniciar sesión.');
           setData(null);
           setNotifications([]);
-          await signOut();
-          router.replace('/');
+
+          if (isSigningOut.current) {
+            return;
+          }
+
+          isSigningOut.current = true;
+
+          try {
+            await signOut();
+          } finally {
+            isSigningOut.current = false;
+          }
+
           return;
         }
 
@@ -68,7 +78,7 @@ export function useDashboardData(): UseDashboardDataResult {
         }
       }
     },
-    [token, router, signOut, request]
+    [token, signOut, request]
   );
 
   useEffect(() => {
