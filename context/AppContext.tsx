@@ -78,6 +78,7 @@ interface AppContextValue {
   dashboard: DashboardState;
   isLoading: boolean;
   signIn: (credentials: SignInCredentials) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   signOut: () => Promise<void>;
   loadSession: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<UserProfile>;
@@ -864,6 +865,70 @@ export function AppProvider({ children }: PropsWithChildren) {
     [fetchAndSyncDashboardHabits, initializeUserSession, persistAuthSession]
   );
 
+  const register = useCallback<AppContextValue['register']>(
+    async ({ username, email, password, height, weight, age }) => {
+      setIsLoading(true);
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedUsername = username.trim();
+
+      try {
+        const data = await apiFetch<{ token?: string; user?: any }>(
+          '/auth/register',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              username: normalizedUsername,
+              email: normalizedEmail,
+              password,
+              height,
+              weight,
+              age,
+            }),
+            skipAuth: true,
+          }
+        );
+
+        const authToken = data?.token;
+        if (!authToken) {
+          throw new Error('No se recibió el token de autenticación.');
+        }
+
+        await setStoredToken(authToken);
+        setToken(authToken);
+
+        const profile = buildUserProfile(data?.user, {
+          id: extractUserIdFromToken(authToken) ?? null,
+          email: normalizedEmail,
+          username: normalizedUsername || normalizedEmail,
+          height,
+          weight,
+          age,
+        });
+
+        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
+        await persistAuthSession(authToken, profile);
+
+        initializeUserSession(profile, {
+          welcomeTitle: '🎉 ¡Bienvenido a Hábitos Saludables!',
+          welcomeMessage: 'Tu plan personalizado está listo para comenzar.',
+        });
+
+        await fetchAndSyncDashboardHabits();
+      } catch (error) {
+        await clearStoredToken();
+        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        setToken(null);
+
+        throw error instanceof Error
+          ? error
+          : new Error('No pudimos crear tu cuenta. Intenta nuevamente.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [fetchAndSyncDashboardHabits, initializeUserSession, persistAuthSession]
+  );
+
   const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
     setIsLoading(true);
     let storedToken: string | null = null;
@@ -1285,6 +1350,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       dashboard,
       isLoading,
       signIn,
+      register,
       signOut,
       loadSession,
       updateProfile,
@@ -1309,6 +1375,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       request,
       refreshReminders,
       signOut,
+      register,
       signIn,
       updateExerciseSettings,
       updateMealTime,

@@ -17,7 +17,7 @@ import { colors, spacing } from '@/constants/theme';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { user, signIn, isLoading } = useAppContext();
+  const { user, signIn, register, isLoading } = useAppContext();
   const [mode, setMode] = useState<'register' | 'login'>('register');
   const [step, setStep] = useState(1);
   const [username, setUsername] = useState('');
@@ -74,7 +74,7 @@ export default function LoginScreen() {
 
     try {
       setError(null);
-      await signIn({
+      await register({
         username: username.trim(),
         email: email.trim(),
         password,
