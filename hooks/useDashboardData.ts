@@ -20,6 +20,8 @@ export function useDashboardData(): UseDashboardDataResult {
   const [error, setError] = useState<string | null>(null);
   const isSigningOut = useRef(false);
 
+  const signingOutRef = useRef(false);
+
   const fetchDashboard = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
       if (!token) {
@@ -51,19 +53,16 @@ export function useDashboardData(): UseDashboardDataResult {
           setError('Tu sesión ha expirado. Vuelve a iniciar sesión.');
           setData(null);
           setNotifications([]);
-
-          if (isSigningOut.current) {
+          if (signingOutRef.current) {
             return;
           }
 
-          isSigningOut.current = true;
-
+          signingOutRef.current = true;
           try {
             await signOut();
           } finally {
-            isSigningOut.current = false;
+            signingOutRef.current = false;
           }
-
           return;
         }
 

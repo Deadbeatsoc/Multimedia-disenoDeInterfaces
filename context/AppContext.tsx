@@ -339,7 +339,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const habitsRef = useRef(habits);
   const remindersRef = useRef(reminders);
 
-  const navigateSafelyWithFallback = useCallback((href: string) => {
+  const navigateSafely = useCallback((href: string) => {
     if (router && typeof router.replace === 'function') {
       try {
         router.replace(href);
@@ -1053,7 +1053,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           await clearPersistedSession();
           setToken(null);
           resetAppState();
-          navigateSafelyWithFallback('/');
+          navigateSafely('/');
           return;
         }
 
@@ -1090,7 +1090,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     fetchAndSyncDashboardHabits,
     initializeUserSession,
     resetAppState,
-    navigateSafelyWithFallback,
+    navigateSafely,
   ]);
 
   useEffect(() => {
@@ -1119,9 +1119,9 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setToken(null);
       resetAppState();
-      navigateSafelyWithFallback('/');
+      navigateSafely('/');
     }
-  }, [clearPersistedSession, resetAppState, navigateSafelyWithFallback]);
+  }, [clearPersistedSession, resetAppState, navigateSafely]);
 
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     async (updates) => {
