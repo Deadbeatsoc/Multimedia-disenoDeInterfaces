@@ -334,6 +334,25 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const nextNotificationId = useRef(1);
   const loadSessionRef = useRef<AppContextValue['loadSession'] | null>(null);
+  const loadSessionTaskRef = useRef<Promise<void> | null>(null);
+  const habitIdentifiersRef = useRef(habitIdentifiers);
+  const habitsRef = useRef(habits);
+  const remindersRef = useRef(reminders);
+
+  const safeReplace = useCallback((href: string) => {
+    if (router && typeof router.replace === 'function') {
+      try {
+        router.replace(href);
+        return;
+      } catch (error) {
+        console.warn('Fallo al navegar con expo-router:', error);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.href = href;
+    }
+  }, []);
 
   const safeReplace = useCallback((href: string) => {
     if (router && typeof router.replace === 'function') {
@@ -389,26 +408,67 @@ export function AppProvider({ children }: PropsWithChildren) {
     (
       nextHabits: Record<HabitSlug, HabitState>,
       localSettings: HabitSettingsMap,
-      identifiers: Record<HabitSlug, number | null> = habitIdentifiers
+      identifiers: Record<HabitSlug, number | null> | null = null
     ) => {
+      const resolvedIdentifiers = identifiers ?? habitIdentifiersRef.current;
       const now = new Date();
       const items: ReminderItem[] = [];
+      const previousByKey = new Map(
+        remindersRef.current.map((reminder) => [
+          `${reminder.habitId ?? reminder.title}:${reminder.type}:${reminder.scheduledFor ?? 'now'}`,
+          reminder,
+        ])
+      );
 
-      const pushReminder = (
+      const areRemindersEqual = (current: ReminderItem[], next: ReminderItem[]) => {
+        if (current.length !== next.length) {
+          return false;
+        }
+
+        for (let index = 0; index < current.length; index += 1) {
+          const a = current[index];
+          const b = next[index];
+
+          if (
+            a.id !== b.id ||
+            a.habitId !== b.habitId ||
+            a.type !== b.type ||
+            a.channel !== b.channel ||
+            a.title !== b.title ||
+            a.message !== b.message ||
+            a.scheduledFor !== b.scheduledFor ||
+            a.read !== b.read
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      };
+
+      const reserveReminder = (
         slug: HabitSlug,
         title: string,
         message: string,
         scheduled: Date
       ) => {
+        if (!nextHabits[slug]) {
+          return;
+        }
+
+        const scheduledIso = scheduled.toISOString();
+        const key = `${resolvedIdentifiers[slug] ?? slug}:${title}:${scheduledIso}`;
+        const existing = previousByKey.get(key);
+
         items.push({
-          id: nextNotificationId.current++,
-          habitId: identifiers[slug] ?? null,
+          id: existing?.id ?? nextNotificationId.current++,
+          habitId: resolvedIdentifiers[slug] ?? null,
           title,
           message,
           type: 'reminder',
           channel: 'in_app',
-          scheduledFor: scheduled.toISOString(),
-          read: false,
+          scheduledFor: scheduledIso,
+          read: existing?.read ?? false,
         });
       };
 
@@ -416,7 +476,12 @@ export function AppProvider({ children }: PropsWithChildren) {
       if (waterSettings.reminderIntervalMinutes > 0) {
         const target = resolveTargetFromSettings('water', localSettings);
         const nextTime = addMinutes(now, waterSettings.reminderIntervalMinutes);
-        pushReminder('water', '💧 Recordatorio de hidratación', `Bebe agua para acercarte a tu meta diaria de ${Math.round(target / 1000)}L.`, nextTime);
+        reserveReminder(
+          'water',
+          '💧 Recordatorio de hidratación',
+          `Bebe agua para acercarte a tu meta diaria de ${Math.round(target / 1000)}L.`,
+          nextTime
+        );
       }
 
       const sleepSettings = localSettings.sleep;
@@ -424,7 +489,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         const [hour, minute] = sleepSettings.bedTime.split(':').map(Number);
         const bedtime = setTimeOfDay(new Date(), hour, minute);
         const reminderTime = subtractMinutes(bedtime, sleepSettings.reminderAdvanceMinutes);
-        pushReminder('sleep', '🌙 Hora de prepararte para dormir', `Ve cerrando tu día para descansar a las ${sleepSettings.bedTime}.`, reminderTime);
+        reserveReminder(
+          'sleep',
+          '🌙 Hora de prepararte para dormir',
+          `Ve cerrando tu día para descansar a las ${sleepSettings.bedTime}.`,
+          reminderTime
+        );
       }
 
       const nutritionSettings = localSettings.nutrition;
@@ -434,7 +504,12 @@ export function AppProvider({ children }: PropsWithChildren) {
           .forEach((meal: NutritionMealConfig) => {
             const [hour, minute] = meal.time.split(':').map(Number);
             const reminderTime = setTimeOfDay(new Date(), hour, minute);
-            pushReminder('nutrition', `🍽️ ${meal.label}`, `Es momento de tu ${meal.label.toLowerCase()}.`, reminderTime);
+            reserveReminder(
+              'nutrition',
+              `🍽️ ${meal.label}`,
+              `Es momento de tu ${meal.label.toLowerCase()}.`,
+              reminderTime
+            );
           });
       }
 
@@ -442,12 +517,17 @@ export function AppProvider({ children }: PropsWithChildren) {
       if (exerciseSettings.reminderEnabled) {
         const [hour, minute] = exerciseSettings.reminderTime.split(':').map(Number);
         const reminderTime = setTimeOfDay(new Date(), hour, minute);
-        pushReminder('exercise', '🏃 Hora de moverte', `Reserva ${exerciseSettings.dailyGoalMinutes} minutos para tu ejercicio de hoy.`, reminderTime);
+        reserveReminder(
+          'exercise',
+          '🏃 Hora de moverte',
+          `Reserva ${exerciseSettings.dailyGoalMinutes} minutos para tu ejercicio de hoy.`,
+          reminderTime
+        );
       }
 
-      setReminders(items);
+      setReminders((prev) => (areRemindersEqual(prev, items) ? prev : items));
     },
-    [habitIdentifiers]
+    []
   );
 
   const syncHabitSummaries = useCallback(
@@ -463,7 +543,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         const next = { ...prev } as Record<HabitSlug, HabitState>;
         let hasUpdates = false;
         let identifiersChanged = false;
-        const identifiersDraft = { ...habitIdentifiers };
+        const identifiersDraft = { ...habitIdentifiersRef.current };
 
         summaries.forEach((summary) => {
           const slug = summary?.slug as HabitSlug | undefined;
@@ -540,8 +620,8 @@ export function AppProvider({ children }: PropsWithChildren) {
         setHabitIdentifiers(computedIdentifiers);
       }
 
-      const finalIdentifiers = computedIdentifiers ?? habitIdentifiers;
-      const finalHabits = computedHabits ?? habits;
+      const finalIdentifiers = computedIdentifiers ?? habitIdentifiersRef.current;
+      const finalHabits = computedHabits ?? habitsRef.current;
 
       if (computedHabits) {
         recomputeDailySnapshot(computedHabits);
@@ -551,7 +631,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         rebuildReminders(finalHabits, settings, finalIdentifiers);
       }
     },
-    [habitIdentifiers, habits, rebuildReminders, recomputeDailySnapshot, settings]
+    [rebuildReminders, recomputeDailySnapshot, settings]
   );
 
   const updateHabitIdentifier = useCallback(
@@ -593,8 +673,8 @@ export function AppProvider({ children }: PropsWithChildren) {
         return next;
       });
 
-      const finalIdentifiers = updatedIdentifiers ?? habitIdentifiers;
-      const finalHabits = computedHabits ?? habits;
+      const finalIdentifiers = updatedIdentifiers ?? habitIdentifiersRef.current;
+      const finalHabits = computedHabits ?? habitsRef.current;
 
       if (computedHabits) {
         recomputeDailySnapshot(computedHabits);
@@ -604,7 +684,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         rebuildReminders(finalHabits, settings, finalIdentifiers);
       }
     },
-    [habitIdentifiers, habits, rebuildReminders, recomputeDailySnapshot, settings]
+    [rebuildReminders, recomputeDailySnapshot, settings]
   );
 
   const fetchAndSyncDashboardHabits = useCallback(async () => {
@@ -645,7 +725,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setNotifications((prev) => [
         {
           id: nextNotificationId.current++,
-          habitId: habitIdentifiers[slug] ?? null,
+          habitId: habitIdentifiersRef.current[slug] ?? null,
           title: '🎉 ¡Objetivo alcanzado!',
           message,
           type: 'achievement',
@@ -657,7 +737,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         ...prev,
       ]);
     },
-    [habitIdentifiers]
+    []
   );
 
   const resetAppState = useCallback(() => {
@@ -717,12 +797,12 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const logHabitEntry = useCallback<AppContextValue['logHabitEntry']>(
     async (slug, value, notes) => {
-      const habit = habits[slug];
+      const habit = habitsRef.current[slug];
       if (!habit) {
         throw new Error('No encontramos este hábito.');
       }
 
-      const habitIdCandidate = habitIdentifiers[slug] ?? habit.summary.id;
+      const habitIdCandidate = habitIdentifiersRef.current[slug] ?? habit.summary.id;
       if (!isValidHabitId(habitIdCandidate)) {
         throw new Error(
           'No se pudo identificar este hábito. Actualiza la información e inténtalo nuevamente.'
@@ -788,12 +868,12 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       return log;
     },
-    [habitIdentifiers, habits, recomputeDailySnapshot, registerAchievementNotification, settings]
+    [recomputeDailySnapshot, registerAchievementNotification, settings]
   );
 
   const applySettings = useCallback(
     (nextSettings: HabitSettingsMap) => {
-      let computedHabits: Record<HabitSlug, HabitState> = habits;
+      let computedHabits: Record<HabitSlug, HabitState> = habitsRef.current;
 
       setSettings(nextSettings);
       setHabits((prev) => {
@@ -820,9 +900,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       });
 
       recomputeDailySnapshot(computedHabits);
-      rebuildReminders(computedHabits, nextSettings);
+      rebuildReminders(computedHabits, nextSettings, habitIdentifiersRef.current);
     },
-    [habits, recomputeDailySnapshot, rebuildReminders]
+    [recomputeDailySnapshot, rebuildReminders]
   );
 
   const signIn = useCallback<AppContextValue['signIn']>(
@@ -944,72 +1024,82 @@ export function AppProvider({ children }: PropsWithChildren) {
     [clearPersistedSession, fetchAndSyncDashboardHabits, initializeUserSession, persistAuthSession]
   );
 
-  const loadSession = useCallback<AppContextValue['loadSession']>(async () => {
-    setIsLoading(true);
-    let storedToken: string | null = null;
-    let forcedSignOut = false;
+  const loadSession = useCallback<AppContextValue['loadSession']>(() => {
+    if (loadSessionTaskRef.current) {
+      return loadSessionTaskRef.current;
+    }
 
-    try {
-      storedToken = await getStoredToken();
-      if (!storedToken) {
-        setToken(null);
-        resetAppState();
-        return;
-      }
+    const task = (async () => {
+      setIsLoading(true);
+      let storedToken: string | null = null;
+      let forcedSignOut = false;
 
-      setToken(storedToken);
+      try {
+        storedToken = await getStoredToken();
+        if (!storedToken) {
+          setToken(null);
+          resetAppState();
+          return;
+        }
 
-      const decodedUserId = extractUserIdFromToken(storedToken);
-      const data = await apiFetch<{ user?: unknown }>('/auth/me');
-      const profile = buildUserProfile(data?.user ?? data, {
-        id: decodedUserId ?? null,
-      });
+        setToken(storedToken);
 
-      if (decodedUserId && profile.id && decodedUserId !== profile.id) {
-        const mismatchError = new Error('Token y perfil no coinciden') as Error & {
-          status?: number;
-        };
-        mismatchError.status = 401;
-        throw mismatchError;
-      }
+        const decodedUserId = extractUserIdFromToken(storedToken);
+        const data = await apiFetch<{ user?: unknown }>('/auth/me');
+        const profile = buildUserProfile(data?.user ?? data, {
+          id: decodedUserId ?? null,
+        });
 
-      initializeUserSession(profile);
-      await fetchAndSyncDashboardHabits();
-      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
-    } catch (error) {
-      const status = (error as { status?: number }).status;
-      if (status === 401 || status === 403) {
-        forcedSignOut = true;
-        await clearPersistedSession();
-        setToken(null);
-        resetAppState();
-        safeReplace('/');
-        return;
-      }
+        if (decodedUserId && profile.id && decodedUserId !== profile.id) {
+          const mismatchError = new Error('Token y perfil no coinciden') as Error & {
+            status?: number;
+          };
+          mismatchError.status = 401;
+          throw mismatchError;
+        }
 
-      if (!forcedSignOut && storedToken) {
-        const cachedProfile = await AsyncStorage.getItem(AUTH_USER_KEY);
-        if (cachedProfile) {
-          try {
-            const parsedProfile = JSON.parse(cachedProfile);
-            const sanitizedProfile = buildUserProfile(
-              parsedProfile,
-              parsedProfile as Partial<UserProfile>
-            );
-            initializeUserSession(sanitizedProfile);
-            return;
-          } catch {
-            await AsyncStorage.removeItem(AUTH_USER_KEY);
+        initializeUserSession(profile);
+        await fetchAndSyncDashboardHabits();
+        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (status === 401 || status === 403) {
+          forcedSignOut = true;
+          await clearPersistedSession();
+          setToken(null);
+          resetAppState();
+          safeReplace('/');
+          return;
+        }
+
+        if (!forcedSignOut && storedToken) {
+          const cachedProfile = await AsyncStorage.getItem(AUTH_USER_KEY);
+          if (cachedProfile) {
+            try {
+              const parsedProfile = JSON.parse(cachedProfile);
+              const sanitizedProfile = buildUserProfile(
+                parsedProfile,
+                parsedProfile as Partial<UserProfile>
+              );
+              initializeUserSession(sanitizedProfile);
+              return;
+            } catch {
+              await AsyncStorage.removeItem(AUTH_USER_KEY);
+            }
           }
         }
-      }
 
-      if (error instanceof Error) {
-        console.warn('No se pudo restaurar la sesión:', error.message);
+        if (error instanceof Error) {
+          console.warn('No se pudo restaurar la sesión:', error.message);
+        }
+      } finally {
+        setIsLoading(false);
+        loadSessionTaskRef.current = null;
       }
-    } finally {
-      setIsLoading(false);
-    }
+    })();
+
+    loadSessionTaskRef.current = task;
+    return task;
   }, [
     clearPersistedSession,
     fetchAndSyncDashboardHabits,
@@ -1021,6 +1111,18 @@ export function AppProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     loadSessionRef.current = loadSession;
   }, [loadSession]);
+
+  useEffect(() => {
+    habitIdentifiersRef.current = habitIdentifiers;
+  }, [habitIdentifiers]);
+
+  useEffect(() => {
+    habitsRef.current = habits;
+  }, [habits]);
+
+  useEffect(() => {
+    remindersRef.current = reminders;
+  }, [reminders]);
 
   useEffect(() => {
     loadSessionRef.current?.();
@@ -1338,8 +1440,8 @@ export function AppProvider({ children }: PropsWithChildren) {
   );
 
   const refreshReminders = useCallback<AppContextValue['refreshReminders']>(() => {
-    rebuildReminders(habits, settings);
-  }, [habits, rebuildReminders, settings]);
+    rebuildReminders(habitsRef.current, settings, habitIdentifiersRef.current);
+  }, [rebuildReminders, settings]);
 
   const dashboard = useMemo<DashboardState>(() => {
     const reminderList = [...reminders].sort((a, b) => {
