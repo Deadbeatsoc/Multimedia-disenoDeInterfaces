@@ -339,22 +339,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const habitsRef = useRef(habits);
   const remindersRef = useRef(reminders);
 
-  const safeReplace = useCallback((href: string) => {
-    if (router && typeof router.replace === 'function') {
-      try {
-        router.replace(href);
-        return;
-      } catch (error) {
-        console.warn('Fallo al navegar con expo-router:', error);
-      }
-    }
-
-    if (typeof window !== 'undefined') {
-      window.location.href = href;
-    }
-  }, []);
-
-  const safeReplace = useCallback((href: string) => {
+  const navigateSafely = useCallback((href: string) => {
     if (router && typeof router.replace === 'function') {
       try {
         router.replace(href);
@@ -1068,7 +1053,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           await clearPersistedSession();
           setToken(null);
           resetAppState();
-          safeReplace('/');
+          navigateSafely('/');
           return;
         }
 
@@ -1105,7 +1090,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     fetchAndSyncDashboardHabits,
     initializeUserSession,
     resetAppState,
-    safeReplace,
+    navigateSafely,
   ]);
 
   useEffect(() => {
@@ -1134,9 +1119,9 @@ export function AppProvider({ children }: PropsWithChildren) {
     } finally {
       setToken(null);
       resetAppState();
-      safeReplace('/');
+      navigateSafely('/');
     }
-  }, [clearPersistedSession, resetAppState, safeReplace]);
+  }, [clearPersistedSession, resetAppState, navigateSafely]);
 
   const updateProfile = useCallback<AppContextValue['updateProfile']>(
     async (updates) => {
