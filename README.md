@@ -203,6 +203,30 @@ El script [`database/schema.sql`](database/schema.sql) crea tablas normalizadas 
 
    Si el token falta o es inválido el servidor responderá con `401 Unauthorized`. Al incluirlo correctamente cada usuario verá únicamente sus hábitos, registros y notificaciones.
 
+### 2.2 Prueba manual: registro duplicado
+
+Sigue estos pasos para verificar que el backend responde con `409 Conflict` cuando se intenta registrar un correo que ya existe:
+
+1. Registra un usuario nuevo con un correo específico (por ejemplo, `duplicado@example.com`).
+
+   ```bash
+   curl -X POST http://localhost:3000/api/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{"name":"Caso Duplicado","email":"duplicado@example.com","password":"demo123","height":170,"weight":70,"age":30}'
+   ```
+
+2. Repite la misma petición cambiando únicamente el nombre (opcional) pero manteniendo el correo electrónico.
+
+3. La segunda llamada debe responder con código `409` y el cuerpo:
+
+   ```json
+   {
+     "message": "El correo ya está registrado"
+   }
+   ```
+
+4. Verifica en la base de datos que solo exista una fila para ese correo en la tabla `users`.
+
 ## 3. Conectar la app Expo con la API
 
 1. Instala las dependencias del proyecto en la raíz (si no lo hiciste antes para el backend, puedes ejecutar ambos `npm install` en paralelo porque usan `package.json` distintos):
