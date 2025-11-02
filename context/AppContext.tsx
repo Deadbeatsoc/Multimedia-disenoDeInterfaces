@@ -354,6 +354,21 @@ export function AppProvider({ children }: PropsWithChildren) {
     }
   }, []);
 
+  const safeReplace = useCallback((href: string) => {
+    if (router && typeof router.replace === 'function') {
+      try {
+        router.replace(href);
+        return;
+      } catch (error) {
+        console.warn('Fallo al navegar con expo-router:', error);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.href = href;
+    }
+  }, []);
+
   const persistAuthSession = useCallback(
     async (authToken: string, profile: UserProfile) => {
       await setStoredToken(authToken);
