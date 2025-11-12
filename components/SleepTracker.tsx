@@ -151,6 +151,7 @@ export function SleepTracker({
           title="Higiene del Sueño"
           description="Consejos para mejorar tu rutina de descanso"
           color={colors.purple.main}
+          videoSource={require('@/assets/videos/GarciaSueno.mp4')}
         />
       </View>
 
