@@ -181,6 +181,7 @@ export function WaterTracker({
           title="Beneficios de la Hidratación"
           description="Descubre por qué el agua es esencial para tu salud"
           color={colors.blue.main}
+          videoSource={require('@/assets/videos/PresentacionAplicacion.mp4')}
         />
       </View>
 

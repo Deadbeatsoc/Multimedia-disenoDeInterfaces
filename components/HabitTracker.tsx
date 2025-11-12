@@ -130,6 +130,7 @@ export function HabitTracker({
             title="Técnicas de Entrenamiento"
             description="Mejora tu rutina de ejercicio"
             color={color}
+            videoSource={require('@/assets/videos/IntruduccionAplicacionOmar.mp4')}
           />
         </View>
       )}
@@ -141,6 +142,7 @@ export function HabitTracker({
             title="Alimentación Saludable"
             description="Consejos para comer mejor"
             color={color}
+            videoSource={require('@/assets/videos/AlimentacionGarcia.mp4')}
           />
         </View>
       )}
