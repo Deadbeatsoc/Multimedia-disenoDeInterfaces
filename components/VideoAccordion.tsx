@@ -14,6 +14,13 @@ import { ChevronDown } from 'lucide-react-native';
 import { Asset } from 'expo-asset';
 import { colors, spacing } from '@/constants/theme';
 
+const webVideoStyle: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  borderRadius: 12,
+  backgroundColor: '#000',
+};
+
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -47,6 +54,31 @@ export function VideoAccordion({
 
   const resolvedUri = asset?.localUri ?? asset?.uri ?? videoUrl;
   const hasVideo = Boolean(resolvedUri);
+
+  const videoHtml = useMemo(() => {
+    if (!resolvedUri) {
+      return '';
+    }
+
+    return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8" />
+<meta name="viewport" content="initial-scale=1, maximum-scale=1" />
+<style>body{margin:0;background-color:transparent;}video{width:100%;height:100%;background-color:#000;border-radius:12px;}</style>
+</head><body><video controls playsinline webkit-playsinline>
+<source src="${resolvedUri}" type="video/mp4" />
+Tu navegador no soporta video.
+</video></body></html>`;
+  }, [resolvedUri]);
+
+  const nativeVideoPlayer = (
+    <WebView
+      source={{ html: videoHtml }}
+      originWhitelist={["*"]}
+      style={styles.webview}
+      scrollEnabled={false}
+      allowsFullscreenVideo={true}
+      automaticallyAdjustContentInsets={false}
+    />
+  );
 
   const toggleAccordion = () => {
     const newState = !isOpen;
@@ -87,22 +119,14 @@ export function VideoAccordion({
         <View style={styles.content}>
           {hasVideo ? (
             <View style={styles.videoContainer}>
-              <WebView
-                source={{
-                  html: `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8" />
-<meta name="viewport" content="initial-scale=1, maximum-scale=1" />
-<style>body{margin:0;background-color:transparent;}video{width:100%;height:100%;background-color:#000;border-radius:12px;}</style>
-</head><body><video controls playsinline webkit-playsinline>
-<source src="${resolvedUri}" type="video/mp4" />
-Tu navegador no soporta video.
-</video></body></html>`,
-                }}
-                originWhitelist={["*"]}
-                style={styles.webview}
-                scrollEnabled={false}
-                allowsFullscreenVideo={true}
-                automaticallyAdjustContentInsets={false}
-              />
+              {Platform.select<React.ReactNode>({
+                web: (
+                  <video src={resolvedUri} controls playsInline style={webVideoStyle} />
+                ),
+                ios: nativeVideoPlayer,
+                android: nativeVideoPlayer,
+                default: nativeVideoPlayer,
+              })}
             </View>
           ) : (
             <View style={styles.placeholderContainer}>
