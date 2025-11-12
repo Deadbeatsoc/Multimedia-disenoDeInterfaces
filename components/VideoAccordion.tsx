@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ChevronDown } from 'lucide-react-native';
+import { Asset } from 'expo-asset';
 import { colors, spacing } from '@/constants/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -21,7 +22,7 @@ interface VideoAccordionProps {
   title: string;
   description?: string;
   videoUrl?: string;
-  thumbnailUrl?: string;
+  videoSource?: number;
   color?: string;
   isOpen?: boolean;
 }
@@ -30,12 +31,22 @@ export function VideoAccordion({
   title,
   description = '',
   videoUrl = '',
-  thumbnailUrl = '',
+  videoSource,
   color = colors.blue.main,
   isOpen: controlledIsOpen = false,
 }: VideoAccordionProps) {
   const [isOpen, setIsOpen] = useState(controlledIsOpen);
   const rotationAnim = useState(new Animated.Value(isOpen ? 1 : 0))[0];
+
+  const asset = useMemo(() => {
+    if (!videoSource) {
+      return undefined;
+    }
+    return Asset.fromModule(videoSource);
+  }, [videoSource]);
+
+  const resolvedUri = asset?.localUri ?? asset?.uri ?? videoUrl;
+  const hasVideo = Boolean(resolvedUri);
 
   const toggleAccordion = () => {
     const newState = !isOpen;
@@ -57,8 +68,6 @@ export function VideoAccordion({
     outputRange: ['0deg', '180deg'],
   });
 
-  const hasVideo = videoUrl && videoUrl.trim().length > 0;
-
   return (
     <View style={styles.container}>
       <TouchableOpacity
@@ -79,10 +88,20 @@ export function VideoAccordion({
           {hasVideo ? (
             <View style={styles.videoContainer}>
               <WebView
-                source={{ uri: videoUrl }}
+                source={{
+                  html: `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8" />
+<meta name="viewport" content="initial-scale=1, maximum-scale=1" />
+<style>body{margin:0;background-color:transparent;}video{width:100%;height:100%;background-color:#000;border-radius:12px;}</style>
+</head><body><video controls playsinline webkit-playsinline>
+<source src="${resolvedUri}" type="video/mp4" />
+Tu navegador no soporta video.
+</video></body></html>`,
+                }}
+                originWhitelist={["*"]}
                 style={styles.webview}
                 scrollEnabled={false}
                 allowsFullscreenVideo={true}
+                automaticallyAdjustContentInsets={false}
               />
             </View>
           ) : (
