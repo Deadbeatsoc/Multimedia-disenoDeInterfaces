@@ -1,18 +1,10 @@
+// constants/config.ts
 import Constants from 'expo-constants';
 
-type ExpoExtra = { apiUrl?: string };
+export const API_BASE_URL = 
+  Constants.expoConfig?.extra?.apiUrl ?? 
+  'http://192.168.0.107:3000/api';
 
-type ExpoConfig = typeof Constants & {
-  expoConfig?: { extra?: ExpoExtra };
-  manifest?: { extra?: ExpoExtra };
-};
-
-export const resolveApiBaseUrl = () => {
-  const extra =
-    (Constants as ExpoConfig)?.expoConfig?.extra ?? (Constants as ExpoConfig)?.manifest?.extra ?? {};
-
-  return (extra?.apiUrl as string | undefined) ?? process.env.EXPO_PUBLIC_API_URL ?? '';
-};
-
-export const API_BASE_URL = resolveApiBaseUrl();
-
+export function resolveApiBaseUrl(): string {
+  return API_BASE_URL;
+}

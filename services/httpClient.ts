@@ -62,24 +62,30 @@ export const getStoredToken = () => AsyncStorage.getItem(AUTH_TOKEN_KEY);
 export const setStoredToken = (token: string) => AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
 export const clearStoredToken = () => AsyncStorage.removeItem(AUTH_TOKEN_KEY);
 
-const decodeBase64Url = (segment: string) => {
+// En httpClient.ts, reemplaza la función decodeBase64Url:
+
+const decodeBase64Url = (segment: string): string => {
+  // Normalizar el Base64 URL a Base64 estándar
   const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
   const padding = (4 - (normalized.length % 4)) % 4;
   const padded = normalized + '='.repeat(padding);
 
-  if (typeof globalThis.atob === 'function') {
-    return globalThis.atob(padded);
+  try {
+    // Intenta usar atob si está disponible (navegador/Expo)
+    if (typeof atob !== 'undefined') {
+      return atob(padded);
+    }
+    
+    // Fallback para Node.js/entornos sin atob
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(padded, 'base64').toString('utf-8');
+    }
+    
+    throw new Error('No hay decodificador Base64 disponible');
+  } catch (error) {
+    console.error('Error decodificando Base64:', error);
+    throw new Error('No se pudo decodificar el token JWT');
   }
-
-  const globalBuffer = (globalThis as typeof globalThis & {
-    Buffer?: { from: (input: string, encoding: string) => { toString: (encoding: string) => string } };
-  }).Buffer;
-
-  if (globalBuffer) {
-    return globalBuffer.from(padded, 'base64').toString('utf-8');
-  }
-
-  throw new Error('No base64 decoder available');
 };
 
 export const extractUserIdFromToken = (token: string | null | undefined): number | null => {

@@ -1092,26 +1092,42 @@ export function AppProvider({ children }: PropsWithChildren) {
     resetAppState,
     navigateSafely,
   ]);
+useEffect(() => {
+  loadSessionRef.current = loadSession;
+}, [loadSession]);
 
-  useEffect(() => {
-    loadSessionRef.current = loadSession;
-  }, [loadSession]);
+useEffect(() => {
+  habitIdentifiersRef.current = habitIdentifiers;
+}, [habitIdentifiers]);
 
-  useEffect(() => {
-    habitIdentifiersRef.current = habitIdentifiers;
-  }, [habitIdentifiers]);
+useEffect(() => {
+  habitsRef.current = habits;
+}, [habits]);
 
-  useEffect(() => {
-    habitsRef.current = habits;
-  }, [habits]);
+useEffect(() => {
+  remindersRef.current = reminders;
+}, [reminders]);
 
-  useEffect(() => {
-    remindersRef.current = reminders;
-  }, [reminders]);
-
-  useEffect(() => {
-    loadSessionRef.current?.();
-  }, []);
+// IMPORTANTE: Este useEffect solo debe ejecutarse UNA VEZ al montar
+useEffect(() => {
+  let mounted = true;
+  
+  const initSession = async () => {
+    if (mounted && loadSessionRef.current) {
+      try {
+        await loadSessionRef.current();
+      } catch (error) {
+        console.error('Error al cargar sesión inicial:', error);
+      }
+    }
+  };
+  
+  initSession();
+  
+  return () => {
+    mounted = false;
+  };
+}, []); // Array vacío: solo se ejecuta al montar
 
   const signOut = useCallback<AppContextValue['signOut']>(async () => {
     try {

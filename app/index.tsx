@@ -14,6 +14,22 @@ import { Redirect, useRouter } from 'expo-router';
 import { User, Mail, Lock, Ruler, Scale, Calendar } from 'lucide-react-native';
 import { useAppContext } from '@/context/AppContext';
 import { colors, spacing } from '@/constants/theme';
+import { LoginIntroAccordion, type IntroVideoItem } from '@/components/LoginIntroAccordion';
+
+const INTRO_VIDEOS: IntroVideoItem[] = [
+  {
+    id: 'welcome',
+    title: 'Bienvenida a Hábitos Saludables',
+    description: 'Recorre las secciones principales y descubre cómo navegar la app.',
+    source: require('@/assets/videos/intro1.mp4'),
+  },
+  {
+    id: 'planner',
+    title: 'Crea tu plan personalizado',
+    description: 'Aprende a registrar hábitos y monitorear tus avances diarios.',
+    source: require('@/assets/videos/intro2.mp4'),
+  },
+];
 
 export default function LoginScreen() {
   const router = useRouter();
