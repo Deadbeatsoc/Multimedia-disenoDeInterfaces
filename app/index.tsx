@@ -21,13 +21,13 @@ const INTRO_VIDEOS: IntroVideoItem[] = [
     id: 'welcome',
     title: 'Bienvenida a Hábitos Saludables',
     description: 'Recorre las secciones principales y descubre cómo navegar la app.',
-    source: require('@/assets/videos/intro1.mp4'),
+    source: require('@/assets/videos/IntruduccionAplicacionOmar.mp4'),
   },
   {
     id: 'planner',
     title: 'Crea tu plan personalizado',
     description: 'Aprende a registrar hábitos y monitorear tus avances diarios.',
-    source: require('@/assets/videos/intro2.mp4'),
+    source: require('@/assets/videos/PresentacionAplicacion.mp4'),
   },
 ];
 
