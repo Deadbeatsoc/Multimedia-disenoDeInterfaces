@@ -14,6 +14,21 @@ import { WebView } from 'react-native-webview';
 import { ChevronDown } from 'lucide-react-native';
 import { colors, spacing } from '@/constants/theme';
 
+const webVideoStyle: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  borderRadius: 12,
+  backgroundColor: '#000',
+};
+
+const buildVideoHtml = (uri: string) => `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8" />
+<meta name="viewport" content="initial-scale=1, maximum-scale=1" />
+<style>body{margin:0;background-color:transparent;}video{width:100%;height:100%;background-color:#000;border-radius:12px;}</style>
+</head><body><video controls playsinline webkit-playsinline>
+<source src="${uri}" type="video/mp4" />
+Tu navegador no soporta video.
+</video></body></html>`;
+
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -99,6 +114,16 @@ export function LoginIntroAccordion({
         <View style={styles.content}>
           {assets.map((video, index) => {
             const videoUri = assetUriMap[video.id];
+            const nativeVideoPlayer: React.ReactNode = videoUri ? (
+              <WebView
+                source={{ html: buildVideoHtml(videoUri) }}
+                originWhitelist={["*"]}
+                style={styles.webview}
+                allowsFullscreenVideo
+                mediaPlaybackRequiresUserAction
+                automaticallyAdjustContentInsets={false}
+              />
+            ) : null;
             return (
               <View key={video.id} style={[styles.videoCard, index > 0 && styles.videoCardSpacing]}>
                 <Text style={styles.videoTitle}>{video.title}</Text>
@@ -107,22 +132,14 @@ export function LoginIntroAccordion({
                 ) : null}
                 {videoUri ? (
                   <View style={styles.webviewContainer}>
-                    <WebView
-                      source={{
-                        html: `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8" />
-<meta name="viewport" content="initial-scale=1, maximum-scale=1" />
-<style>body{margin:0;background-color:transparent;}video{width:100%;height:100%;background-color:#000;border-radius:12px;}</style>
-</head><body><video controls playsinline webkit-playsinline>
-<source src="${videoUri}" type="video/mp4" />
-Tu navegador no soporta video.
-</video></body></html>`,
-                      }}
-                      originWhitelist={["*"]}
-                      style={styles.webview}
-                      allowsFullscreenVideo
-                      mediaPlaybackRequiresUserAction
-                      automaticallyAdjustContentInsets={false}
-                    />
+                    {Platform.select<React.ReactNode>({
+                      web: (
+                        <video src={videoUri} controls playsInline style={webVideoStyle} />
+                      ),
+                      ios: nativeVideoPlayer,
+                      android: nativeVideoPlayer,
+                      default: nativeVideoPlayer,
+                    })}
                   </View>
                 ) : (
                   <View style={styles.placeholder}> 
