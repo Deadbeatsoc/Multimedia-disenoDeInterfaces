@@ -16,18 +16,21 @@ import { useAppContext } from '@/context/AppContext';
 import { colors, spacing } from '@/constants/theme';
 import { LoginIntroAccordion, type IntroVideoItem } from '@/components/LoginIntroAccordion';
 
-const INTRO_VIDEOS: IntroVideoItem[] = [
+const REGISTER_VIDEOS: IntroVideoItem[] = [
   {
-    id: 'welcome',
-    title: 'Bienvenida a Hábitos Saludables',
-    description: 'Recorre las secciones principales y descubre cómo navegar la app.',
-    source: require('@/assets/videos/IntruduccionAplicacionOmar.mp4'),
-  },
-  {
-    id: 'planner',
-    title: 'Crea tu plan personalizado',
-    description: 'Aprende a registrar hábitos y monitorear tus avances diarios.',
+    id: 'register',
+    title: 'Crea tu cuenta en Hábitos Saludables',
+    description: 'Descubre los pasos para completar tu perfil y comenzar con tus metas.',
     source: require('@/assets/videos/PresentacionAplicacion.mp4'),
+  },
+];
+
+const LOGIN_VIDEOS: IntroVideoItem[] = [
+  {
+    id: 'login',
+    title: 'Accede rápidamente a tu progreso',
+    description: 'Aprende cómo iniciar sesión para continuar con tu plan personalizado.',
+    source: require('@/assets/videos/IntruduccionAplicacionOmar.mp4'),
   },
 ];
 
@@ -172,6 +175,12 @@ export default function LoginScreen() {
 
           {mode === 'register' ? (
             <>
+              <LoginIntroAccordion
+                title="¿Cómo registrarte?"
+                description="Sigue las instrucciones del video para crear tu cuenta y configurar tus objetivos iniciales."
+                videos={REGISTER_VIDEOS}
+                defaultOpen
+              />
               <View style={styles.stepIndicator}>
                 <View style={[styles.stepBullet, step >= 1 && styles.stepBulletActive]} />
                 <View style={styles.stepLine} />
@@ -256,33 +265,41 @@ export default function LoginScreen() {
               )}
             </>
           ) : (
-            <View style={styles.formCard}>
-              <Text style={styles.formTitle}>Bienvenido de nuevo</Text>
-              <InputField
-                label="Correo electrónico"
-                value={email}
-                onChangeText={setEmail}
-                placeholder="correo@ejemplo.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                icon={<Mail size={18} color={colors.gray[500]} />}
+            <>
+              <LoginIntroAccordion
+                title="¿Cómo iniciar sesión?"
+                description="Mira el video para recordar cómo ingresar con tus credenciales y continuar con tus hábitos."
+                videos={LOGIN_VIDEOS}
+                defaultOpen
               />
-              <InputField
-                label="Contraseña"
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Tu contraseña"
-                secureTextEntry
-                icon={<Lock size={18} color={colors.gray[500]} />}
-              />
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>Bienvenido de nuevo</Text>
+                <InputField
+                  label="Correo electrónico"
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="correo@ejemplo.com"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  icon={<Mail size={18} color={colors.gray[500]} />}
+                />
+                <InputField
+                  label="Contraseña"
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Tu contraseña"
+                  secureTextEntry
+                  icon={<Lock size={18} color={colors.gray[500]} />}
+                />
 
-              <TouchableOpacity
-                style={[styles.primaryButton, !canLogin && styles.buttonDisabled]}
-                onPress={handleLogin}
-                disabled={!canLogin || isLoading}>
-                <Text style={styles.primaryButtonText}>Entrar</Text>
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  style={[styles.primaryButton, !canLogin && styles.buttonDisabled]}
+                  onPress={handleLogin}
+                  disabled={!canLogin || isLoading}>
+                  <Text style={styles.primaryButtonText}>Entrar</Text>
+                </TouchableOpacity>
+              </View>
+            </>
           )}
 
           {error && <Text style={styles.errorText}>{error}</Text>}
