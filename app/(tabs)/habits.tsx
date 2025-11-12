@@ -353,6 +353,7 @@ export default function Habits() {
             color={selectedHabitSummary.color}
             onSave={(value, notes) => handleSaveHabit(selectedHabitSummary, value, notes)}
             isSaving={isLogging}
+            habitType="exercise"
           />
         );
       case 'nutrition':
@@ -366,6 +367,7 @@ export default function Habits() {
             color={selectedHabitSummary.color}
             onSave={(value, notes) => handleSaveHabit(selectedHabitSummary, value, notes)}
             isSaving={isLogging}
+            habitType="nutrition"
           />
         );
       default:

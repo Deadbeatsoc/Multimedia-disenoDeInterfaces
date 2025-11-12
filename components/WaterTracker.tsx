@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Droplets } from 'lucide-react-native';
 import { ProgressRing } from './ProgressRing';
+import { VideoAccordion } from './VideoAccordion';
 import { colors, spacing } from '@/constants/theme';
 import { HabitLog } from '@/types/api';
 
@@ -174,6 +175,15 @@ export function WaterTracker({
         <View style={styles.historyList}>{renderHistory()}</View>
       </View>
 
+      <View style={styles.videosSection}>
+        <Text style={styles.sectionLabel}>Aprende sobre Hidratación</Text>
+        <VideoAccordion
+          title="Beneficios de la Hidratación"
+          description="Descubre por qué el agua es esencial para tu salud"
+          color={colors.blue.main}
+        />
+      </View>
+
       {onComplete && (
         <TouchableOpacity
           style={[styles.saveButton, { backgroundColor: color }]}
@@ -261,6 +271,9 @@ const styles = StyleSheet.create({
   },
   historyList: {
     gap: spacing.md,
+  },
+  videosSection: {
+    marginBottom: spacing.xl,
   },
   emptyHistory: {
     paddingVertical: spacing.lg,

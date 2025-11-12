@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Moon } from 'lucide-react-native';
 import { ProgressRing } from './ProgressRing';
+import { VideoAccordion } from './VideoAccordion';
 import { colors, spacing } from '@/constants/theme';
 
 interface SleepTrackerProps {
@@ -144,6 +145,15 @@ export function SleepTracker({
         <Text style={styles.qualityLabel}>{qualityLabels[quality - 1]}</Text>
       </View>
 
+      <View style={styles.videosSection}>
+        <Text style={styles.sectionLabel}>Aprende sobre el Sueño</Text>
+        <VideoAccordion
+          title="Higiene del Sueño"
+          description="Consejos para mejorar tu rutina de descanso"
+          color={colors.purple.main}
+        />
+      </View>
+
       {onSave && (
         <TouchableOpacity
           style={[styles.saveButton, { backgroundColor: colors.purple.main }]}
@@ -253,6 +263,9 @@ const styles = StyleSheet.create({
     color: colors.purple.main,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  videosSection: {
+    marginBottom: spacing.xl,
   },
   saveButton: {
     paddingVertical: spacing.lg,

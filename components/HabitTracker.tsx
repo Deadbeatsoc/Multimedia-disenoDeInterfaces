@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Minus, Plus } from 'lucide-react-native';
 import { ProgressRing } from './ProgressRing';
+import { VideoAccordion } from './VideoAccordion';
 import { colors, spacing } from '@/constants/theme';
 
 interface HabitTrackerProps {
@@ -20,6 +21,7 @@ interface HabitTrackerProps {
   onSave?: (value: number, notes: string) => Promise<void> | void;
   isSaving?: boolean;
   defaultNotes?: string;
+  habitType?: 'exercise' | 'nutrition';
 }
 
 export function HabitTracker({
@@ -32,6 +34,7 @@ export function HabitTracker({
   onSave,
   isSaving = false,
   defaultNotes = '',
+  habitType,
 }: HabitTrackerProps) {
   const [current, setCurrent] = useState(initialCurrent);
   const [notes, setNotes] = useState(defaultNotes);
@@ -119,6 +122,28 @@ export function HabitTracker({
           textAlignVertical="top"
         />
       </View>
+
+      {habitType === 'exercise' && (
+        <View style={styles.videosSection}>
+          <Text style={styles.videosTitle}>Aprende sobre Ejercicio</Text>
+          <VideoAccordion
+            title="Técnicas de Entrenamiento"
+            description="Mejora tu rutina de ejercicio"
+            color={color}
+          />
+        </View>
+      )}
+
+      {habitType === 'nutrition' && (
+        <View style={styles.videosSection}>
+          <Text style={styles.videosTitle}>Aprende sobre Nutrición</Text>
+          <VideoAccordion
+            title="Alimentación Saludable"
+            description="Consejos para comer mejor"
+            color={color}
+          />
+        </View>
+      )}
 
       <TouchableOpacity
         style={[styles.saveButton, { backgroundColor: color }]}
@@ -215,6 +240,15 @@ const styles = StyleSheet.create({
     color: colors.gray[900],
     backgroundColor: colors.gray[50],
     minHeight: 80,
+  },
+  videosSection: {
+    marginBottom: spacing.xl,
+  },
+  videosTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.gray[900],
+    marginBottom: spacing.md,
   },
   saveButton: {
     paddingVertical: spacing.lg,
